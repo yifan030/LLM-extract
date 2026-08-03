@@ -11,8 +11,12 @@ def test_end_to_end_matching():
     with open(os.path.join(base_dir, "fixtures", "sample_exam.llm.json"), "r", encoding="utf-8") as f:
         llm_result = LlmExtractResult.model_validate(json.load(f))
 
-    matcher = Matcher(level4_names=["交集", "并集", "子集"])
-    intermediate = matcher.match(llm_result, source_file="sample_exam.md")
+    matcher = Matcher()
+    intermediate = matcher.match(
+        llm_result,
+        source_file="sample_exam.md",
+        level4_names=["交集", "并集", "子集"],
+    )
 
     assert intermediate.metadata.matching_mode == "strict"
     assert len(intermediate.vertices) == 2

@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-"""Tests for the Stage 2 strict matcher."""
-from exam_extract.matcher import Matcher
-from exam_extract.models import (
+"""Tests for the Stage 2 strict matcher service."""
+from app.domain.models import (
     ExamPaper,
     LlmExtractResult,
     Question,
     QuestionType,
 )
-from exam_extract.snowflake import Snowflake
+from app.services.matcher import MatcherService
+from app.utils.snowflake import Snowflake
 
 
 def _build_llm_result() -> LlmExtractResult:
@@ -27,7 +27,7 @@ def _build_llm_result() -> LlmExtractResult:
 
 def test_match_question_to_existing_kp():
     llm_result = _build_llm_result()
-    matcher = Matcher()
+    matcher = MatcherService()
     result = matcher.match(llm_result, source_file="test.md", level4_names=["子集", "交集"])
 
     assert len(result.vertices) == 2  # exam_paper + question
@@ -41,7 +41,7 @@ def test_match_question_to_existing_kp():
 
 
 def test_match_metadata_and_vertex_labels():
-    matcher = Matcher()
+    matcher = MatcherService()
     result = matcher.match(_build_llm_result(), source_file="test.md", level4_names=["子集"])
 
     assert result.metadata.source_file == "test.md"
@@ -59,7 +59,7 @@ def test_match_metadata_and_vertex_labels():
 
 
 def test_contains_and_belongs_to_type_edges():
-    matcher = Matcher()
+    matcher = MatcherService()
     result = matcher.match(_build_llm_result(), source_file="test.md", level4_names=["子集"])
 
     contains = [e for e in result.edges if e.label == "contains"]
@@ -72,7 +72,7 @@ def test_contains_and_belongs_to_type_edges():
 
 
 def test_unmatched_item_records_question_id_and_number():
-    matcher = Matcher()
+    matcher = MatcherService()
     result = matcher.match(_build_llm_result(), source_file="test.md", level4_names=["子集"])
 
     item = result.unmatched[0]
@@ -92,7 +92,7 @@ def test_candidate_names_are_stripped_before_matching():
             candidate_knowledge_points=[" 子集 "],
         )],
     )
-    matcher = Matcher()
+    matcher = MatcherService()
     result = matcher.match(llm_result, source_file="test.md", level4_names=["子集"])
 
     examines = [e for e in result.edges if e.label == "examines"]

@@ -105,8 +105,8 @@ def main():
             return
         extracted = _load_manual_llm_result(llm_output_path)
 
-    matcher = Matcher(level4_names)
-    intermediate = matcher.match(extracted, source_file=args.markdown)
+    matcher = Matcher()
+    intermediate = matcher.match(extracted, source_file=args.markdown, level4_names=level4_names)
 
     with open(args.output, "w", encoding="utf-8") as f:
         # model_dump_json 不支持 ensure_ascii，用 json.dumps 保证中文可读
