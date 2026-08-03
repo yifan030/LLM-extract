@@ -1,0 +1,22 @@
+{
+  "exam_paper": {
+    "title": "高一数学测试卷",
+    "subject": "数学",
+    "grade": "高一",
+    "total_score": 100,
+    "duration_minutes": 90
+  },
+  "question_types": [
+    {"name": "单选题", "description": ""}
+  ],
+  "questions": [
+    {
+      "number": "1",
+      "content": "已知集合 $A=\\{1,2\\}$，$B=\\{2,3\\}$，则 $A \\cap B =$（ ）",
+      "answer": "B",
+      "score": 5,
+      "question_type": "单选题",
+      "candidate_knowledge_points": ["交集"]
+    }
+  ]
+}

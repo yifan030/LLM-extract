@@ -1,0 +1,193 @@
+{
+  "exam_paper": {
+    "title": "长郡中学 2023 级高一数学期末考试模拟试卷",
+    "subject": "数学",
+    "grade": "高一",
+    "total_score": 150,
+    "duration_minutes": 120
+  },
+  "question_types": [
+    {"name": "单选题", "description": ""},
+    {"name": "多选题", "description": ""},
+    {"name": "填空题", "description": ""},
+    {"name": "解答题", "description": ""}
+  ],
+  "questions": [
+    {
+      "number": "1",
+      "content": "已知集合 $ M = \\{x | x < 3\\} $,  $ N = \\{x | 2^x > 2\\} $, 则  $ M \\cap N = $ ( )\\nA.  $ \\varnothing $ B.  $ \\{x | 0 < x < 3\\} $ C.  $ \\{x | 1 < x < 3\\} $ D.  $ \\{x | 2 < x < 3\\} $",
+      "answer": "C",
+      "score": 5,
+      "question_type": "单选题",
+      "candidate_knowledge_points": ["交集", "描述法", "指数函数的概念"]
+    },
+    {
+      "number": "2",
+      "content": "已知命题 p:  $ \\exists x_0 > 0, \\ln x_0 < 0 $. 则  $ \\neg P $ 为 ( )\\nA.  $ \\forall x > 0, \\ln x \\geq 0 $\\nB.  $ \\forall x \\leq 0, \\ln x \\geq 0 $\\nC.  $ \\exists x_0 > 0, \\ln x_0 \\geq 0 $\\nD.  $ \\exists x_0 \\leq 0, \\ln x_0 < 0 $",
+      "answer": "A",
+      "score": 5,
+      "question_type": "单选题",
+      "candidate_knowledge_points": ["存在量词命题及否定", "命题的概念"]
+    },
+    {
+      "number": "3",
+      "content": "已知角  $ \\alpha $ 的终边过点  $ P(-4m, 3m) $， $ (m \\neq 0) $，则  $ 2\\sin\\alpha + \\cos\\alpha $ 的值是（）\\nA. 1 或 -1 B.  $ \\frac{2}{5} $ 或  $ -\\frac{2}{5} $ C. 1 或  $ -\\frac{2}{5} $ D. -1 或  $ \\frac{2}{5} $",
+      "answer": "B",
+      "score": 5,
+      "question_type": "单选题",
+      "candidate_knowledge_points": ["任意角三角函数定义", "同角三角函数基本关系"]
+    },
+    {
+      "number": "4",
+      "content": "已知 x>0, y>0, 且  $ \\frac{2}{x} + \\frac{1}{y} = 1 $，若  $ x + 2y > m^2 + 2m $ 恒成立，则实数 m 的取值范围是()\\nA.  $ (-\\infty, -2] \\cup [4, +\\infty) $\\nB.  $ (-\\infty, -4] \\cup [2, +\\infty) $\\nC.  $ (-2, 4) $\\nD.  $ (-4, 2) $",
+      "answer": "D",
+      "score": 5,
+      "question_type": "单选题",
+      "candidate_knowledge_points": ["利用基本不等式求最值"]
+    },
+    {
+      "number": "5",
+      "content": "在同一坐标系中，函数  $ y = ax + a $ 与  $ y = a^{x} $ 的图象大致是 ( )",
+      "answer": "",
+      "score": 5,
+      "question_type": "单选题",
+      "candidate_knowledge_points": ["指数函数图象", "指数函数的概念"]
+    },
+    {
+      "number": "6",
+      "content": "设函数  $ f(x)=x^{2}-(2a+1)x+a^{2}-6 $，若不等式  $ f(x)<0 $ 的解集是  $ (-5, -2) $，则实数 a=()\\nA. -4 B. -6 C. -4 或 -6 D. -4 或 0",
+      "answer": "C",
+      "score": 5,
+      "question_type": "单选题",
+      "candidate_knowledge_points": ["二次函数与一元二次方程、不等式的对应关系", "一元二次不等式"]
+    },
+    {
+      "number": "7",
+      "content": "已知  $ \\cos \\alpha = \\frac{1}{3} $， $ \\cos(\\alpha + \\beta) = -\\frac{1}{3} $，且  $ \\alpha, \\beta \\in \\left(0, \\frac{\\pi}{2}\\right) $，则  $ \\cos(\\alpha - \\beta) $ 的值等于 （ ）\\nA.  $ -\\frac{1}{2} $ B.  $ \\frac{1}{2} $ C.  $ -\\frac{1}{3} $ D.  $ \\frac{23}{27} $",
+      "answer": "D",
+      "score": 5,
+      "question_type": "单选题",
+      "candidate_knowledge_points": ["两角和与差公式", "同角三角函数基本关系"]
+    },
+    {
+      "number": "8",
+      "content": "某化工厂生产一种溶液，按市场要求，杂质含量不能超过0.1%，若初时含杂质2%，每过滤一次可使杂质含量减少 $ \\frac{1}{3} $，使产品达到市场要求则至少应过滤的次数为（）（已知 $ \\lg2=0.3010,\\lg3=0.4771 $）\\nA. 6 B. 7 C. 8 D. 9",
+      "answer": "C",
+      "score": 5,
+      "question_type": "单选题",
+      "candidate_knowledge_points": ["指数衰减模型", "对数的运算", "常用对数"]
+    },
+    {
+      "number": "9",
+      "content": "如果 a<b<0，那么下列不等式不成立的是 ( )\\nA.  $ \\frac{1}{a}<\\frac{1}{b} $ B. ab<b^2 C. -ab<-a^2 D.  $ -\\frac{1}{a}<-\\frac{1}{b} $",
+      "answer": "",
+      "score": 5,
+      "question_type": "多选题",
+      "candidate_knowledge_points": ["不等式的概念"]
+    },
+    {
+      "number": "10",
+      "content": "给出以下四个命题，其中为真命题的是\\nA. 函数  $ y=\\sqrt{x^2-4} $ 与函数  $ y=\\sqrt{x+2}\\cdot\\sqrt{x-2} $ 表示同一个函数\\nB. 若函数  $ f(2x) $ 的定义域为  $ [0,2] $，则函数  $ f(x) $ 的定义域为  $ [0,4] $\\nC. 若函数  $ y=f(x) $ 是奇函数，则函数  $ y=f(x)-f(-x) $ 也是奇函数\\nD. 函数  $ y=-\\frac{1}{x} $ 在  $ (-\\infty,0)\\cup(0,+\\infty) $ 上是单调增函数",
+      "answer": "",
+      "score": 5,
+      "question_type": "多选题",
+      "candidate_knowledge_points": ["函数定义", "函数相等", "定义域", "奇函数", "单调性"]
+    },
+    {
+      "number": "11",
+      "content": "已知函数  $ f(x)=(\\sin x + \\cos |x|)\\sin x - \\cos x $，下列说法正确的是 ( )\\nA.  $ f(x) $ 是周期函数\\nB. 若  $ \\left|f\\left(x_{1}\\right)\\right| + \\left|f\\left(x_{2}\\right)\\right| = 2 $，则  $ x_{1} + x_{2} = \\frac{k\\pi}{2} $ ( $ k \\in \\mathbb{Z} $)\\nC.  $ f(x) $ 在区间  $ \\left[-\\frac{\\pi}{2}, \\frac{\\pi}{2}\\right] $ 上是增函数\\nD. 函数  $ g(x) = f(x) + 1 $ 在区间  $ [0, 2\\pi] $ 上有且仅有 1 个零点",
+      "answer": "",
+      "score": 5,
+      "question_type": "多选题",
+      "candidate_knowledge_points": ["正弦函数", "余弦函数", "周期性", "单调性"]
+    },
+    {
+      "number": "12",
+      "content": "已知  $ f(x) $ 是定义域为  $ \\mathbb{R} $ 的偶函数，在  $ (-\\infty, 0) $ 上单调递减，且  $ f(-3) \\cdot f(6) < 0 $，那么下列结论中正确的是 （ ）\\nA.  $ f(x) $ 可能有三个零点  \\nB.  $ f(3) \\cdot f(-4) \\geq 0 $  \\nC.  $ f(-4) < f(6) $  \\nD.  $ f(0) < f(-6) $",
+      "answer": "",
+      "score": 5,
+      "question_type": "多选题",
+      "candidate_knowledge_points": ["偶函数", "单调性", "函数零点与方程的解"]
+    },
+    {
+      "number": "13",
+      "content": "教材必修1第87页给出了图象对称与奇偶性的联系：若  $ y = f(x) $ 为奇函数，则  $ y = f(x - a) + b $ 的图象关于点  $ (a, b) $ 中心对称，易知： $ f(x) = \\frac{2^x - 1}{2^x + 1} $ 是奇函数，则  $ g(x) = \\frac{2^x + 3}{2^x + 2} $ 图象的对称中心是___。",
+      "answer": "",
+      "score": 5,
+      "question_type": "填空题",
+      "candidate_knowledge_points": ["奇函数", "对称中心", "指数函数的概念"]
+    },
+    {
+      "number": "14",
+      "content": "筒车是我国古代发明的一种水利灌溉工具，既经济又环保。明朝科学家徐光启在《农政全书》中用图画描绘了筒车的工作原理（图1）。假定在水流量稳定的情况下，筒车上的每一个盛水筒都做匀速圆周运动如图2，将筒车抽象为一个半径为的圆，设筒车按逆时针方向每旋转一周用时120秒，当t=0时，盛水筒M位于点 $ P_{0}(3,-3\\sqrt{3}) $，经过t秒后运动到点 $ P(x,y) $，点P的纵坐标满足 $ y = f(t) = R \\sin(\\omega t + \\varphi) \\left( t \\geq 0, \\omega > 0, |\\varphi| < \\frac{\\pi}{2} \\right) $，则当筒车旋转100秒时，盛水筒M对应的点P的纵坐标为 ___。",
+      "answer": "",
+      "score": 5,
+      "question_type": "填空题",
+      "candidate_knowledge_points": ["三角函数模型应用", "y=Asin(ωx+φ)图象"]
+    },
+    {
+      "number": "15",
+      "content": "设函数  $ g(x) = x^2 - 2x (x \\in \\mathbb{R}) $， $ f(x) = \\begin{cases} g(x) + x + 4, & x < g(x) \\\\ g(x) - x, & x \\geq g(x) \\end{cases} $，则  $ f(x) $ 的值域是 ___",
+      "answer": "",
+      "score": 5,
+      "question_type": "填空题",
+      "candidate_knowledge_points": ["分段函数", "二次函数图象", "值域"]
+    },
+    {
+      "number": "16",
+      "content": "若函数  $ y = \\left(\\frac{1}{a}\\right)^{2x} + 2\\left(\\frac{1}{a}\\right)^x - 1 $（ $ a > 0 $，且  $ a \\ne 1 $）在  $ x \\in [-1,1] $ 上的最大值为 23，则  $ a $ 的值为___。",
+      "answer": "",
+      "score": 5,
+      "question_type": "填空题",
+      "candidate_knowledge_points": ["指数函数的概念", "指数幂运算性质", "最值"]
+    },
+    {
+      "number": "17",
+      "content": "求值：（1） $ \\lg 5^{2}+\\frac{2}{3}\\lg 8+\\lg 5\\cdot\\lg 20+\\left(\\lg 2\\right)^{2} $;（2）已知 $ \\frac{\\tan\\alpha}{\\tan\\alpha-1}=-1 $，求 $ \\sin^{2}\\alpha+\\sin\\alpha\\cos\\alpha+2 $",
+      "answer": "",
+      "score": 10,
+      "question_type": "解答题",
+      "candidate_knowledge_points": ["对数的运算", "常用对数", "同角三角函数基本关系"]
+    },
+    {
+      "number": "18",
+      "content": "已知函数  $ f(x)=\\sin(x-\\frac{\\pi}{6})+\\cos(x-\\frac{\\pi}{3}) $， $ g(x)=2\\sin^{2}\\frac{x}{2} $.（1）若  $ \\alpha $ 是第一象限角，且  $ f(\\alpha)=\\frac{3\\sqrt{3}}{5} $. 求  $ g(\\alpha) $ 的值；（2）求使  $ f(x) \\geq g(x) $ 成立的 x 的取值集合.",
+      "answer": "",
+      "score": 12,
+      "question_type": "解答题",
+      "candidate_knowledge_points": ["两角和与差公式", "二倍角公式", "正弦函数"]
+    },
+    {
+      "number": "19",
+      "content": "已知函数  $ f(x)=\\frac{a}{a^{2}-1}\\left(a^{x}-a^{-x}\\right) $，其中  $ a>0, a\\neq1 $（1）对于函数  $ f(x) $，当  $ x \\in (-1,1) $ 时， $ f(1-m) + f(1-m^2) < 0 $，求实数  $ m $ 的取值集合；（2）当  $ x \\in (-\\infty, 2) $ 时， $ f(x) - 4 $ 的值为负，求  $ a $ 的取值范围.",
+      "answer": "",
+      "score": 12,
+      "question_type": "解答题",
+      "candidate_knowledge_points": ["指数函数的概念", "奇偶性", "单调性"]
+    },
+    {
+      "number": "20",
+      "content": "某厂家拟在 2024 年举行促销活动，经调查测算，该产品的年销售量（即该厂的年产量）x 万件与年促销费用 m 万元 ( $ m \\geqslant 0 $) 满足 x = 3 -  $ \\frac{k}{m+1} $ (k 为常数)，如果不搞促销活动，则该产品的年销售量只能是 1 万件。已知 2024 年生产该产品的固定投入为 8 万元。每生产一万件该产品需要再投入 16 万元，厂家将每件产品的销售价格定为每件产品年平均成本的 1.5 倍（产品成本包括固定投入和再投入两部分资金）。(1)将2024年该产品的利润y万元表示为年促销费用m万元的函数;(2)该厂家2024年的促销费用投入多少万元时，厂家的利润最大？",
+      "answer": "",
+      "score": 12,
+      "question_type": "解答题",
+      "candidate_knowledge_points": ["函数建模", "函数最大值", "函数最小值", "利用基本不等式求最值"]
+    },
+    {
+      "number": "21",
+      "content": "已知函数 $ f(x)=\\sqrt{3}\\sin(\\omega x+\\varphi)+2\\sin^{2}\\left(\\frac{\\omega x+\\varphi}{2}\\right)-1(\\omega>0,0<\\varphi<\\pi) $为奇函数，且 $ f(x) $图象的相邻两对称轴间的距离为 $ \\frac{\\pi}{2} $.（1）当 $ x\\in[-\\frac{\\pi}{2},\\frac{\\pi}{4}] $时，求 $ f(x) $的单调递减区间；（2）将函数  $ f(x) $ 的图象向右平移  $ \\frac{\\pi}{6} $ 个单位长度，再把横坐标缩小为原来的  $ \\frac{1}{2} $ （纵坐标变），得到函数  $ y = g(x) $ 的图象，当  $ x \\in [-\\frac{\\pi}{12}, \\frac{\\pi}{6}] $ 时，求函数  $ g(x) $ 的值域.（3）（*）对于第（2）问中的函数 $ g(x) $，记方程 $ g(x)=\\frac{4}{3} $在 $ x\\in[\\frac{\\pi}{6},\\frac{4\\pi}{3}] $上的根从小到依次为 $ x_{1} $， $ x_{2} $， $ \\cdots x_{n} $，试确定 $ n $的值，并求 $ x_{1}+2x_{2}+2x_{3}+\\cdots+2x_{n-1}+x_{n} $的值.",
+      "answer": "",
+      "score": 12,
+      "question_type": "解答题",
+      "candidate_knowledge_points": ["正弦函数图象", "平移变换", "伸缩变换", "最值"]
+    },
+    {
+      "number": "22",
+      "content": "已知  $ a \\in R $，函数  $ f(x) = \\log_2\\left(\\frac{1}{x} + a\\right) $.(1)当 a=5 时，解不等式  $ f(x)>0 $;(2)若关于 x 的方程  $ f(x)-\\log_2[(a-4)x+2a-5]=0 $ 的解集中恰好只有一个元素，求 a 的取值范围；(3)设  $ a>0 $，若对任意  $ t\\in\\left[\\frac{1}{2},1\\right] $，函数  $ f(x) $ 在区间  $ [t,\\ t+1] $ 上的最大值与最小值的差不超过 1，求  $ a $ 的取值范围.",
+      "answer": "",
+      "score": 12,
+      "question_type": "解答题",
+      "candidate_knowledge_points": ["对数函数的概念", "函数零点与方程的解", "单调性"]
+    }
+  ]
+}

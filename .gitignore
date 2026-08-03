@@ -1,0 +1,13 @@
+# 项目中间产物
+tmp/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
