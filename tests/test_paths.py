@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from exam_extract import paths
+from app.utils import paths
 
 
 def test_get_project_root_finds_readme(monkeypatch, tmp_path):
