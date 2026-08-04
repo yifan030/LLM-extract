@@ -38,6 +38,7 @@ class Settings(BaseSettings):
 
     # ── App ──
     debug: bool = False
+    output_dir: str = "tmp/extractions"
 
     @property
     def hg_base_url(self) -> str:

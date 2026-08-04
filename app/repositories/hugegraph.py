@@ -85,8 +85,12 @@ class HugeGraphRepository:
         log.error("顶点创建失败: %s (%s): %s", vertex.label, vertex.id, resp.text)
         return False, False
 
-    async def create_edge(self, edge: Edge) -> bool:
-        """创建边。"""
+    async def create_edge(self, edge: Edge) -> tuple[bool, bool]:
+        """创建边，返回 ``(created, duplicated)``。
+
+        200/201 -> created；400 且文案含 "already exists" -> duplicated；
+        其余情况二者皆 False。
+        """
         url = f"{self.base_url}/graph/edges"
         payload: dict[str, Any] = {
             "label": edge.label,
@@ -98,9 +102,12 @@ class HugeGraphRepository:
             resp = await client.post(url, json=payload)
         if resp.status_code in (200, 201):
             log.info("边创建成功: %s -[%s]-> %s", edge.outV, edge.label, edge.inV)
-            return True
+            return True, False
+        if resp.status_code == 400 and "already exists" in resp.text.lower():
+            log.debug("边已存在，跳过: %s -[%s]-> %s", edge.outV, edge.label, edge.inV)
+            return False, True
         log.error("边创建失败: %s -[%s]-> %s: %s", edge.outV, edge.label, edge.inV, resp.text)
-        return False
+        return False, False
 
     async def list_vertices(
         self, label: str, limit: int = 100, offset: int = 0
@@ -123,8 +130,12 @@ class HugeGraphRepository:
             return resp.json().get("total", 0)
 
     async def get_vertex(self, vertex_id: str) -> dict | None:
-        """按 id 查询顶点；不存在时返回 None。"""
-        url = f"{self.base_url}/graph/vertices/{vertex_id}"
+        """按 id 查询顶点；不存在时返回 None。
+
+        HugeGraph CUSTOMIZE_STRING 顶点 ID 在 URL 中必须用双引号包裹，
+        否则会被误解析为 Number 类型。
+        """
+        url = f'{self.base_url}/graph/vertices/"{vertex_id}"'
         async with await self._client() as client:
             resp = await client.get(url)
             if resp.status_code == 404:
@@ -133,10 +144,14 @@ class HugeGraphRepository:
             return resp.json()
 
     async def get_vertex_edges(
-        self, vertex_id: str, direction: str = "out", label: str | None = None
+        self, vertex_id: str, direction: str = "OUT", label: str | None = None
     ) -> list[dict]:
-        """查询顶点的出/入边。"""
-        url = f"{self.base_url}/graph/edges?vertex_id={vertex_id}&direction={direction}"
+        """查询顶点的出/入边。
+
+        HugeGraph 要求 direction 大写 (OUT/IN/BOTH)，
+        CUSTOMIZE_STRING 顶点 ID 需用双引号包裹。
+        """
+        url = f'{self.base_url}/graph/edges?vertex_id=%22{vertex_id}%22&direction={direction.upper()}'
         if label:
             url += f"&label={label}"
         async with await self._client() as client:

@@ -30,7 +30,7 @@ async def get_paper(
     return await svc.get_paper(paper_id)
 
 
-@router.get("/papers/{paper_id}/questions", response_model=list)
+@router.get("/papers/{paper_id}/questions", response_model=list[QuestionDetail])
 async def list_paper_questions(
     paper_id: str,
     svc: KnowledgeService = Depends(get_knowledge_service),

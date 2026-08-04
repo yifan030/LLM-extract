@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Stage 2 strict matcher service: links LLM extraction output to level-4 knowledge points."""
+import hashlib
 from datetime import datetime
-from typing import Optional
 
 from app.domain.models import (
     Edge,
@@ -14,19 +14,19 @@ from app.domain.models import (
     UnmatchedItem,
     Vertex,
 )
-from app.utils.snowflake import Snowflake
 
 
 class MatcherService:
-    """Stateless strict matcher.
+    """Stateless strict matcher — uses deterministic IDs for idempotent imports.
+
+    Paper and question vertex IDs are derived from ``hashlib.md5(source_file)``
+    so that re-extracting the same MinIO object always produces the same IDs.
+    HugeGraph rejects duplicate vertex IDs, making re-imports safe.
 
     ``level4_names`` is passed to :meth:`match` rather than stored at init, so a
     single service instance can be reused across extractions with different
     knowledge-point data.
     """
-
-    def __init__(self, snowflake: Optional[Snowflake] = None):
-        self.snowflake = snowflake or Snowflake()
 
     def match(
         self,
@@ -39,21 +39,25 @@ class MatcherService:
 
         level4_map = {name.strip(): f"level_4_{name.strip()}" for name in level4_names}
 
-        exam_paper_id = self.snowflake.next_id()
-        paper_vertex_id = f"paper_{exam_paper_id}"
+        # deterministic paper ID from source path → 幂等导入
+        paper_hash = hashlib.md5(source_file.encode()).hexdigest()
+        paper_int_id = int(paper_hash[:15], 16)  # 60-bit → fits Java Long
+        paper_vertex_id = f"paper_{paper_hash}"
 
         vertices: list[Vertex] = []
         edges: list[Edge] = []
         unmatched: list[UnmatchedItem] = []
 
-        paper_props = self._build_paper_props(llm_result.exam_paper, exam_paper_id, now)
+        paper_props = self._build_paper_props(llm_result.exam_paper, paper_int_id, now)
         vertices.append(Vertex(label="exam_paper", id=paper_vertex_id, properties=paper_props))
 
         for q in llm_result.questions:
-            question_id = self.snowflake.next_id()
-            question_vertex_id = f"question_{question_id}"
+            # deterministic question ID from source + number → 幂等导入
+            q_hash = hashlib.md5(f"{source_file}:{q.number}".encode()).hexdigest()
+            q_int_id = int(q_hash[:15], 16)  # 60-bit → fits Java Long
+            question_vertex_id = f"question_{q_hash}"
             question_props = self._build_question_props(
-                q, question_id, exam_paper_id, llm_result.question_types, now
+                q, q_int_id, paper_int_id, llm_result.question_types, now
             )
             vertices.append(Vertex(label="question", id=question_vertex_id, properties=question_props))
 
@@ -98,9 +102,9 @@ class MatcherService:
             unmatched=unmatched,
         )
 
-    def _build_paper_props(self, paper: ExamPaper, exam_paper_id: int, now: str) -> dict:
+    def _build_paper_props(self, paper: ExamPaper, paper_int_id: int, now: str) -> dict:
         return {
-            "exam_paper_id": exam_paper_id,
+            "exam_paper_id": paper_int_id,
             "title": paper.title,
             "subject": paper.subject,
             "grade": paper.grade,
@@ -113,19 +117,19 @@ class MatcherService:
     def _build_question_props(
         self,
         q: Question,
-        question_id: int,
-        exam_paper_id: int,
+        q_int_id: int,
+        paper_int_id: int,
         question_types: list[QuestionType],
         now: str,
     ) -> dict:
         type_id = self._resolve_question_type_id(q.question_type, question_types)
         return {
-            "question_id": question_id,
+            "question_id": q_int_id,
             "content": q.content,
             "answer": q.answer,
             "score": q.score,
             "question_type_id": type_id,
-            "exam_paper_id": exam_paper_id,
+            "exam_paper_id": paper_int_id,
             "source_file_id": 0,
             "sub_file_id": 0,
             "created_at": now,

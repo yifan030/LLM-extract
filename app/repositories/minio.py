@@ -44,10 +44,13 @@ class MinioRepository:
         """读取对象内容并以 utf-8 解码返回；不存在时抛 MinioObjectNotFound。"""
         try:
             response = await self._client.get_object(self.bucket, object_key)
+            if response is None:
+                raise MinioObjectNotFound(object_key)
             data = await response.read()
-            await response.close()
-            await response.release_conn()
+            response.release()
             return data.decode("utf-8")
+        except MinioObjectNotFound:
+            raise
         except Exception as exc:
             log.error("读取 MinIO 文件失败: %s, err=%s", object_key, exc)
             raise MinioObjectNotFound(object_key) from exc

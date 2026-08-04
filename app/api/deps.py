@@ -60,5 +60,6 @@ def get_extraction_service(
     llm_svc: LlmService = Depends(get_llm_service),
     prompt_svc: PromptService = Depends(get_prompt_service),
     matcher_svc: MatcherService = Depends(get_matcher_service),
+    settings: Settings = Depends(get_settings),
 ) -> ExtractionService:
-    return ExtractionService(minio_repo, hg_repo, llm_svc, prompt_svc, matcher_svc)
+    return ExtractionService(minio_repo, hg_repo, llm_svc, prompt_svc, matcher_svc, settings)

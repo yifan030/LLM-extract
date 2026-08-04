@@ -4,33 +4,55 @@
 
 ## 核心能力
 
-- **Markdown 试卷解析**：读取试卷 Markdown，保留 LaTeX 公式。
-- **LLM 自动抽取**：支持 OpenAI-compatible API（OpenAI、DeepSeek、Qwen、Moonshot、vLLM 等），自动抽取题目与候选四级知识点。
+- **Markdown 试卷解析**：从 MinIO 读取试卷 Markdown，保留 LaTeX 公式。
+- **LLM 自动抽取**：支持 OpenAI-compatible API（OpenAI、DeepSeek、Qwen 等），自动抽取题目与候选四级知识点。
 - **严格知识点对齐**：将 LLM 给出的候选知识点名称与 HugeGraph 中已有的四级知识点精确匹配，未命中项进入 `unmatched` 报告，不新建知识点。
-- **HugeGraph 导入**：自动创建 `exam_paper`、`question` 顶点及 `contains`、`belongs_to_type`、`examines` 边，已存在顶点会跳过并计数。
-- **雪花 ID**：`exam_paper_id` 与 `question_id` 使用雪花算法生成，保证全局唯一。
+- **幂等导入**：试卷和题目的顶点 ID 由源文件路径确定性派生（MD5），重复导入同一份试卷时 HugeGraph 自动跳过已存在顶点和边，不会产生重复数据。
+- **中间产物审计**：支持将 LLM 原始输出和匹配后的中间 JSON 落盘，人工复核 `unmatched` 清单后再导入。
+- **雪花 ID**：CLI 工具保留雪花 ID 生成器，供其他工具链使用。
 
 ## 项目结构
 
 ```text
 .
-├── exam_extract/              # 主包
-│   ├── __init__.py
-│   ├── cli.py                 # 命令行入口（一键脚本）
-│   ├── llm.py                 # OpenAI-compatible LLM 客户端
-│   ├── prompt.py              # Prompt 生成与四级知识点加载
-│   ├── matcher.py             # 候选知识点严格匹配
-│   ├── adapter.py             # HugeGraph REST API 导入
-│   ├── models.py              # Pydantic 模型
-│   ├── logger.py              # 日志 fallback
-│   └── README.md              # 模块级说明
+├── app/
+│   ├── main.py                  # FastAPI 应用入口
+│   ├── cli.py                   # 命令行入口
+│   ├── api/
+│   │   ├── deps.py              # 依赖注入
+│   │   └── v1/
+│   │       ├── router.py        # V1 路由汇总
+│   │       └── endpoints/
+│   │           ├── extraction.py # 抽取流水线端点
+│   │           ├── knowledge.py  # 知识点查询
+│   │           ├── minio.py      # MinIO 文件浏览 + webhook
+│   │           └── papers.py     # 试卷与题目查询
+│   ├── core/
+│   │   ├── config.py            # pydantic-settings 配置中心
+│   │   ├── events.py            # Redis Streams 消费者
+│   │   ├── exceptions.py        # 统一异常定义
+│   │   └── logging.py           # 日志 fallback
+│   ├── domain/
+│   │   ├── models.py            # 领域模型（Pydantic）
+│   │   └── schemas.py           # API 请求/响应 DTO
+│   ├── repositories/
+│   │   ├── hugegraph.py         # HugeGraph REST API 封装
+│   │   └── minio.py             # MinIO 异步 SDK 封装
+│   ├── services/
+│   │   ├── extraction.py        # 抽取流水线编排
+│   │   ├── knowledge.py         # 知识点/试卷查询
+│   │   ├── llm.py               # AsyncOpenAI LLM 调用
+│   │   ├── matcher.py           # 候选知识点严格匹配
+│   │   ├── minio.py             # MinIO 文件浏览服务
+│   │   └── prompt.py            # Prompt 构建
+│   └── utils/
+│       └── snowflake.py         # 简易雪花 ID 生成器
 ├── prompts/
-│   └── exam_extract.md        # LLM Prompt 模板
-├── tests/                     # 测试集
-├── reference/                 # 试卷样例与参考数据
-├── docs/superpowers/          # 设计文档与实施计划
+│   └── exam_extract.md          # LLM Prompt 模板
+├── tests/                       # 测试集
+├── reference/                   # 试卷样例、LLM 输出样例、schema 参考
 ├── requirements.txt
-└── README.md                  # 本文件
+└── README.md
 ```
 
 ## 安装
@@ -40,71 +62,140 @@ cd /Users/edy/Documents/llm-extract-question
 pip install -r requirements.txt
 ```
 
-依赖：`pydantic>=2.0`、`requests>=2.28.0`、`openai>=1.0`。
+## 配置
 
-## 快速开始（一键模式）
+在项目根目录创建 `.env`：
 
-设置 LLM API key 后，一条命令完成全流程：
+```env
+# LLM
+LLM_API_KEY=sk-...
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-chat
+LLM_MAX_TOKENS=16384
 
-```bash
-export LLM_API_KEY=sk-...
-# 可选：使用非 OpenAI 的 OpenAI-compatible 服务
-export LLM_BASE_URL=https://api.deepseek.com/v1
-export LLM_MODEL=deepseek-chat
+# MinIO
+MINIO_ENDPOINT=localhost:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+MINIO_BUCKET=llm-construct
 
-python -m exam_extract.cli \
-  --markdown reference/24-01-20高一数课堂资料（模拟卷）.md \
-  --output tmp/exam_result.json \
-  --import-to-hg
+# Redis
+REDIS_URL=redis://localhost:6379/0
+
+# HugeGraph
+HG_HOST=202.107.249.39
+HG_PORT=50045
+HG_USER=admin
+HG_PASSWD=admin
 ```
 
-命令执行流程：
+所有配置项支持环境变量覆盖，详见 `app/core/config.py`。
 
-1. 从 HugeGraph 加载 591 个四级知识点名称。
-2. 自动生成 Prompt 并调用 LLM。
-3. 将 LLM 返回保存为 `tmp/24-01-20高一数课堂资料（模拟卷）.llm.json`。
-4. 严格匹配候选知识点，生成中间 JSON。
-5. 将中间 JSON 导入 HugeGraph，打印导入报告。
+## 快速开始
 
-### CLI 参数说明
+### 方式一：Web API
 
-| 参数 | 环境变量 | 默认值 | 说明 |
+启动服务：
+
+```bash
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+```
+
+**审计模式（推荐）：先抽取落盘，人工复核后再导入**
+
+```bash
+# 第 1 步：仅抽取 + 保存产物，不入库
+curl -X POST http://localhost:8080/api/v1/extract \
+  -H 'Content-Type: application/json' \
+  -d '{"object_key":"education/uploads/.../模拟卷.md",
+       "save_artifacts":true, "import_to_hg":false}'
+
+# 返回：
+# {"paper_id":"paper_890e5428fd13...",
+#  "question_count":30, "matched_kp":68, "unmatched_count":21,
+#  "artifact_dir":"tmp/extractions/890e5428fd13", "imported":false}
+```
+
+审计产物：
+
+```bash
+ls tmp/extractions/890e5428fd13/
+# llm_response.json      # LLM 原始输出（试题+答案+候选知识点）
+# intermediate.json      # 匹配后中间 JSON（vertices/edges/unmatched）
+
+# 重点审计 unmatched 清单
+cat tmp/extractions/890e5428fd13/intermediate.json \
+  | python -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d['unmatched'], indent=2, ensure_ascii=False))"
+```
+
+**第 2 步：审计通过后导入**
+
+```bash
+curl -X POST http://localhost:8080/api/v1/extract \
+  -H 'Content-Type: application/json' \
+  -d '{"object_key":"education/uploads/.../模拟卷.md",
+       "save_artifacts":false, "import_to_hg":true}'
+```
+
+> 第二次运行 paper_id 相同，HugeGraph 侧幂等跳过已存在的顶点和边。
+
+**直接导入模式（跳过审计）**
+
+```bash
+# 默认行为：save_artifacts=false, import_to_hg=true
+curl -X POST http://localhost:8080/api/v1/extract \
+  -H 'Content-Type: application/json' \
+  -d '{"object_key":"education/uploads/.../模拟卷.md"}'
+```
+
+### 方式二：CLI
+
+```bash
+# 审计模式：仅抽取，不入库
+python -m app.cli \
+  --object-key "education/uploads/.../模拟卷.md" \
+  --save-artifacts --skip-import
+
+# 直接导入模式
+python -m app.cli \
+  --object-key "education/uploads/.../模拟卷.md" \
+  --save-artifacts
+```
+
+## API 端点
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/health` | 健康检查 |
+| `POST` | `/api/v1/extract` | 试卷抽取（支持审计/导入模式） |
+| `GET` | `/api/v1/minio/files` | MinIO `.md` 文件列表 |
+| `POST` | `/api/v1/minio/webhook/minio` | MinIO bucket 事件回调 |
+| `GET` | `/api/v1/knowledge` | 四级知识点列表 |
+| `GET` | `/api/v1/knowledge/{kp_id}` | 单个知识点详情 |
+| `GET` | `/api/v1/papers` | 已导入试卷列表 |
+| `GET` | `/api/v1/papers/{paper_id}` | 试卷详情 |
+| `GET` | `/api/v1/papers/{paper_id}/questions` | 试卷题目列表 |
+| `GET` | `/api/v1/questions/{question_id}` | 题目详情 |
+
+### 抽取请求参数
+
+```json
+{
+  "object_key": "education/uploads/.../模拟卷.md",
+  "save_artifacts": false,
+  "import_to_hg": true
+}
+```
+
+| 参数 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `--markdown` | - | 必填 | 试卷 Markdown 文件路径 |
-| `--output` | - | 必填 | 中间 JSON 输出路径 |
-| `--host` | - | `202.107.249.39` | HugeGraph 主机 |
-| `--port` | - | `50045` | HugeGraph 端口 |
-| `--user` | - | `admin` | HugeGraph 用户名 |
-| `--passwd` | - | `admin` | HugeGraph 密码 |
-| `--graphspace` | - | `DEFAULT` | HugeGraph graphspace |
-| `--graph` | - | `edu` | HugeGraph 图名 |
-| `--import-to-hg` | - | 否 | 是否直接导入 HugeGraph |
-| `--llm-api-key` | `LLM_API_KEY` / `OPENAI_API_KEY` | `None` | LLM API key，存在则自动调用 LLM |
-| `--llm-base-url` | `LLM_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible 接口地址 |
-| `--llm-model` | `LLM_MODEL` | `gpt-4o` | 模型名 |
-| `--llm-temperature` | - | `0.0` | 采样温度 |
-| `--llm-max-tokens` | - | `8192` | 最大输出 token |
-| `--llm-timeout` | - | `120.0` | LLM 调用超时秒数 |
+| `object_key` | string | 必填 | MinIO 文件路径 |
+| `save_artifacts` | bool | `false` | 是否将 LLM 输出和中间 JSON 落盘到 `tmp/extractions/` |
+| `import_to_hg` | bool | `true` | 是否导入 HugeGraph |
 
-## 手动模式（两步走）
+## 幂等性
 
-如果不提供 `--llm-api-key`，CLI 会生成 Prompt 并提示你手动将 LLM 输出保存为同名 `.llm.json`：
-
-```bash
-# 第 1 步：生成 Prompt 并提示保存 LLM 输出
-python -m exam_extract.cli \
-  --markdown reference/24-01-20高一数课堂资料（模拟卷）.md \
-  --output tmp/exam_result.json
-
-# 按终端提示，将 LLM 输出保存为：
-# reference/24-01-20高一数课堂资料（模拟卷）.llm.json
-
-# 第 2 步：读取 .llm.json 并导入 HugeGraph
-python -m exam_extract.cli \
-  --markdown reference/24-01-20高一数课堂资料（模拟卷）.md \
-  --output tmp/exam_result.json \
-  --import-to-hg
-```
+试卷顶点 ID 格式 `paper_{md5(object_key)}`，题目顶点 ID 格式 `question_{md5(object_key:题号)}`。同一份 MinIO 文件每次抽取产生相同的顶点 ID，HugeGraph 主键冲突自动跳过，不会重复创建顶点或边。
 
 ## 运行测试
 
@@ -112,48 +203,10 @@ python -m exam_extract.cli \
 python -m pytest tests/ -v
 ```
 
-当前测试覆盖：模型校验、Prompt 生成、严格匹配、HugeGraph Adapter、LLM 客户端、CLI 自动/手动分支。
-
-## 流水线架构
-
-```text
-Markdown 试卷
-     │
-     ▼
-┌─────────────────────┐
-│  Prompt 生成 + 知识点加载  │  exam_extract/prompt.py
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│  LLM 自动抽取（可选）      │  exam_extract/llm.py
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│  候选知识点严格匹配        │  exam_extract/matcher.py
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│  中间 JSON（vertices/edges/unmatched） │  exam_extract/models.py
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│  HugeGraph REST API 导入  │  exam_extract/adapter.py
-└─────────────────────┘
-```
-
 ## 设计要点
 
-- **LLM 不输出物理 id**：只输出候选知识点名称，避免模型编造不存在的 `level_4_xxx`。
+- **LLM 不输出物理 id**：只输出候选知识点名称，避免模型编造不存在的 ID。
 - **匹配逻辑由代码控制**：严格精确匹配，保证所有 `examines` 边的目标都是已有四级知识点。
-- **幂等导入**：重复导入同一试卷时，已存在顶点会被跳过，不会破坏已有数据。
-- **未命中可追溯**：所有未匹配候选进入 `unmatched` 列表，便于人工复核。
-
-## 相关文档
-
-- 设计文档：`docs/superpowers/specs/2026-08-01-exam-knowledge-point-linking-design.md`
-- 实施计划：`docs/superpowers/plans/2026-08-02-exam-knowledge-point-linking-plan.md`
-- 模块说明：`exam_extract/README.md`
+- **幂等导入**：确定性 ID 保证重复导入不产生重复数据。
+- **未命中可追溯**：所有未匹配候选进入 `unmatched` 列表并落盘，便于人工复核。
+- **中间产物先于导入**：产物在导入 HugeGraph 之前写入磁盘，即使导入失败也能保留审计材料。

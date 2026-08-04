@@ -39,6 +39,15 @@ class KnowledgePointNotFound(AppError):
         )
 
 
+class PaperNotFound(AppError):
+    def __init__(self, paper_id: str):
+        super().__init__(
+            f"试卷不存在: {paper_id}",
+            status_code=404,
+            detail={"paper_id": paper_id},
+        )
+
+
 class ExtractionValidationError(AppError):
     def __init__(self, message: str, detail: dict | None = None):
         super().__init__(message, status_code=422, detail=detail)

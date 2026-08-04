@@ -101,4 +101,5 @@ class LlmService:
             except json.JSONDecodeError:
                 pass
 
+        log.error("LLM 原始输出 (前500字符): %s", text[:500])
         raise LlmApiCallError("无法从 LLM 输出中解析出 JSON")

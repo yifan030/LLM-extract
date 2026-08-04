@@ -2,7 +2,12 @@
 from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import get_knowledge_service
-from app.domain.schemas import KnowledgePointDetail, KnowledgePointItem, PaginatedResponse
+from app.domain.schemas import (
+    KnowledgePointDetail,
+    KnowledgePointItem,
+    PaginatedResponse,
+    QuestionDetail,
+)
 from app.services.knowledge import KnowledgeService
 
 router = APIRouter()
@@ -24,3 +29,11 @@ async def get_knowledge(
     svc: KnowledgeService = Depends(get_knowledge_service),
 ):
     return await svc.get_knowledge(kp_id)
+
+
+@router.get("/knowledge/{kp_id}/questions", response_model=list[QuestionDetail])
+async def list_knowledge_questions(
+    kp_id: str,
+    svc: KnowledgeService = Depends(get_knowledge_service),
+):
+    return await svc.list_kp_questions(kp_id)

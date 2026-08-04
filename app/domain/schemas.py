@@ -10,6 +10,8 @@ T = TypeVar("T")
 # ── 请求 ──
 class ExtractRequest(BaseModel):
     object_key: str
+    save_artifacts: bool = False
+    import_to_hg: bool = True
 
 
 # ── 响应 ──
@@ -17,6 +19,9 @@ class ExtractResult(BaseModel):
     paper_id: str
     question_count: int
     matched_kp: int
+    unmatched_count: int = 0
+    artifact_dir: str | None = None
+    imported: bool = False
 
 
 class MinioFileItem(BaseModel):
