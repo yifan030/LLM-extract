@@ -11,3 +11,17 @@ __pycache__/
 .vscode/
 .idea/
 .DS_Store
+
+# 环境配置（含密钥）
+.env
+.env.*
+
+# 项目文档与参考资料
+docs/
+reference/
+
+# 测试
+tests/
+
+# Superpowers 工作区
+.superpowers/
