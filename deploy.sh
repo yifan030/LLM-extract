@@ -42,7 +42,7 @@ start_server() {
     fi
 
     log_info "启动服务 http://0.0.0.0:$PORT ..."
-    nohup python -m uvicorn app.main:app \
+    nohup python -m uvicorn main:app \
         --host 0.0.0.0 \
         --port "$PORT" \
         --reload \

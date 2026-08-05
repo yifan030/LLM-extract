@@ -15,44 +15,41 @@
 
 ```text
 .
-├── app/
-│   ├── main.py                  # FastAPI 应用入口
-│   ├── cli.py                   # 命令行入口
-│   ├── api/
-│   │   ├── deps.py              # 依赖注入
-│   │   └── v1/
-│   │       ├── router.py        # V1 路由汇总
-│   │       └── endpoints/
-│   │           ├── extraction.py # 抽取流水线端点
-│   │           ├── knowledge.py  # 知识点查询
-│   │           ├── minio.py      # MinIO 文件浏览 + webhook
-│   │           ├── papers.py     # 试卷与题目查询
-│   │           └── scoring.py    # OCR markdown 解析（判分）
-│   ├── core/
-│   │   ├── config.py            # pydantic-settings 配置中心
-│   │   ├── events.py            # Redis Streams 消费者
-│   │   ├── exceptions.py        # 统一异常定义
-│   │   └── logging.py           # 日志 fallback
-│   ├── domain/
-│   │   ├── models.py            # 领域模型（Pydantic）
-│   │   └── schemas.py           # API 请求/响应 DTO
-│   ├── repositories/
-│   │   ├── hugegraph.py         # HugeGraph REST API 封装
-│   │   └── minio.py             # MinIO 异步 SDK 封装
-│   ├── services/
-│   │   ├── extraction.py        # 抽取流水线编排
-│   │   ├── knowledge.py         # 知识点/试卷查询
-│   │   ├── llm.py               # AsyncOpenAI LLM 调用
-│   │   ├── matcher.py           # 候选知识点严格匹配
-│   │   ├── minio.py             # MinIO 文件浏览服务
-│   │   ├── prompt.py            # Prompt 构建
-│   │   └── scoring.py           # OCR markdown 解析（不走 LLM）
-│   └── utils/
-│       └── snowflake.py         # 简易雪花 ID 生成器
-├── prompts/
-│   └── exam_extract.md          # LLM Prompt 模板
-├── tests/                       # 测试集
-├── reference/                   # 试卷样例、LLM 输出样例、schema 参考
+├── main.py                     # FastAPI 应用入口
+├── cli.py                      # 命令行入口
+├── bin/                        # 启动/部署脚本
+├── conf/                       # 配置
+│   └── config.py               # pydantic-settings 配置中心
+├── core/                       # 基础机制
+│   ├── exceptions.py           # 统一异常定义
+│   └── events.py               # Redis Streams 消费者
+├── libs/                       # 外部系统封装
+│   ├── hugegraph.py            # HugeGraph REST API 封装
+│   └── minio.py                # MinIO 异步 SDK 封装
+├── model/                      # 纯 Pydantic 数据模型
+│   ├── models.py               # 领域模型
+│   └── schemas.py              # API 请求/响应 DTO
+├── service/                    # 业务逻辑
+│   ├── api/                    # HTTP 接口层
+│   │   ├── deps.py             # FastAPI 依赖注入
+│   │   ├── router.py           # 路由汇总
+│   │   └── endpoints/          # 端点处理函数
+│   ├── extraction.py           # 抽取流水线编排
+│   ├── knowledge.py            # 知识点/试卷查询
+│   ├── llm.py                  # AsyncOpenAI LLM 调用
+│   ├── matcher.py              # 知识点严格匹配
+│   ├── minio.py                # MinIO 文件浏览服务
+│   ├── prompt.py               # Prompt 构建
+│   └── scoring.py              # OCR markdown 解析（判分）
+├── utils/                      # 通用工具
+│   ├── snowflake.py            # 简易雪花 ID 生成器
+│   └── paths.py                # 项目路径管理
+├── logs/                       # 日志配置
+│   └── logging.py
+├── prompts/                    # LLM Prompt 模板
+├── tests/                      # 测试集
+├── reference/                  # 参考资料
+├── docs/                       # 文档
 ├── requirements.txt
 └── README.md
 ```
@@ -91,7 +88,7 @@ HG_USER=admin
 HG_PASSWD=admin
 ```
 
-所有配置项支持环境变量覆盖，详见 `app/core/config.py`。
+所有配置项支持环境变量覆盖，详见 `conf/config.py`。
 
 ## 快速开始
 
@@ -100,7 +97,7 @@ HG_PASSWD=admin
 启动服务：
 
 ```bash
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+python -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload
 ```
 
 **审计模式（推荐）：先抽取落盘，人工复核后再导入**
@@ -154,12 +151,12 @@ curl -X POST http://localhost:8080/api/v1/extract \
 
 ```bash
 # 审计模式：仅抽取，不入库
-python -m app.cli \
+python cli.py \
   --object-key "education/uploads/.../模拟卷.md" \
   --save-artifacts --skip-import
 
 # 直接导入模式
-python -m app.cli \
+python cli.py \
   --object-key "education/uploads/.../模拟卷.md" \
   --save-artifacts
 ```
