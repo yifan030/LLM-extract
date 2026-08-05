@@ -68,20 +68,36 @@ class MilvusRepository:
 
     async def _ensure_collection(self, name, schema, index_params) -> None:
         client = self._get_client()
-        try:
-            await client.create_collection(
-                collection_name=name,
-                schema=schema,
-                index_params=index_params,
-            )
-            log.info("创建 collection 成功: %s", name)
-        except Exception as exc:  # noqa: BLE001 - 兼容服务端 "already exists"
-            if "already exists" in str(exc).lower():
-                log.info("collection 已存在，跳过创建: %s", name)
-            else:
-                raise
+        if await self._collection_exists(name):
+            log.info("collection 已存在，跳过创建: %s", name)
+        else:
+            try:
+                await client.create_collection(
+                    collection_name=name,
+                    schema=schema,
+                    index_params=index_params,
+                )
+                log.info("创建 collection 成功: %s", name)
+            except Exception as exc:  # noqa: BLE001 - 检查与创建间的并发竞态
+                if "already exist" in str(exc).lower():
+                    log.info("collection 已存在（并发），跳过创建: %s", name)
+                else:
+                    raise
         await client.load_collection(name, timeout=60.0)
         log.info("collection 已加载: %s", name)
+
+    async def _collection_exists(self, name: str) -> bool:
+        """检查 collection 是否存在。
+
+        ``AsyncMilvusClient``（pymilvus 2.5.x）未暴露 ``has_collection``，
+        这里改用底层异步连接的 ``describe_collection`` 实现等价的判断。
+        """
+        conn = self._get_client()._get_connection()
+        try:
+            await conn.describe_collection(name, timeout=5.0)
+            return True
+        except Exception:
+            return False
 
     def _build_question_schema(self, client: AsyncMilvusClient):
         """题目 collection 的 schema（含 ``content`` 的 BM25 Function）。"""
@@ -249,10 +265,13 @@ class MilvusRepository:
 
     # ── 检索 ──────────────────────────────────────────────────────
 
-    async def hybrid_search_questions(self, query_vec, expr, limit, output_fields) -> list[dict]:
+    async def hybrid_search_questions(
+        self, query_vec, expr, limit, output_fields, query_text: str = "",
+    ) -> list[dict]:
         """Dense + sparse(BM25) 混合检索题目，返回归一化的 hit 列表。
 
         - ``query_vec``: 查询文本的 dense embedding。
+        - ``query_text``: sparse(BM25) 全文检索的查询文本；默认空串。
         - ``expr``: 标量预过滤表达式（如 ``array_contains(kp_names_l2, "集合")``）。
         - ``limit``: 最终返回条数（两个子请求各取 ``limit*5`` 再经 RRF 融合）。
         - ``output_fields``: 需要返回的标量字段。
@@ -268,7 +287,7 @@ class MilvusRepository:
             expr=expr,
         )
         sparse_req = AnnSearchRequest(
-            data=[],
+            data=[query_text],
             anns_field="sparse_vector",
             param={"metric_type": "BM25"},
             limit=limit * 5,
