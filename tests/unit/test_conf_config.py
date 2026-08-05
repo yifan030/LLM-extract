@@ -34,7 +34,7 @@ def _clear_env(monkeypatch):
 
 class TestSettings:
     def test_defaults(self):
-        s = Settings()
+        s = Settings(_env_file=None)
         assert s.llm_api_key == ""
         assert s.llm_base_url == "https://api.openai.com/v1"
         assert s.llm_model == "gpt-4o"
@@ -56,7 +56,7 @@ class TestSettings:
         assert s.debug is False
 
     def test_hg_base_url(self):
-        s = Settings()
+        s = Settings(_env_file=None)
         assert (
             s.hg_base_url
             == "http://202.107.249.39:50045/graphspaces/DEFAULT/graphs/edu"
@@ -66,7 +66,7 @@ class TestSettings:
         monkeypatch.setenv("HG_HOST", "localhost")
         monkeypatch.setenv("HG_PORT", "9999")
         monkeypatch.setenv("LLM_MODEL", "gpt-5")
-        s = Settings()
+        s = Settings(_env_file=None)
         assert s.hg_host == "localhost"
         assert s.hg_port == 9999
         assert s.llm_model == "gpt-5"
