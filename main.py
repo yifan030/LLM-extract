@@ -33,6 +33,9 @@ async def lifespan(app: FastAPI):
     settings = Settings()
     log.info("应用启动")
 
+    # Milvus 长连接仓库（client 惰性创建）；关闭阶段需显式释放
+    milvus_repo: MilvusRepository | None = None
+
     # ── 启动 Redis Streams 消费者 ──
     if settings.redis_url:
         minio_repo = MinioRepository(settings)
@@ -47,6 +50,12 @@ async def lifespan(app: FastAPI):
             else None
         )
         milvus_repo = MilvusRepository(settings)
+        # 启动自检：校验 embedding 维度与 Milvus schema 一致（失败只告警，不阻断启动）
+        if embed_svc is not None:
+            ok, msg = await embed_svc.check_dimension()
+            log.info("Embedding dimension check: %s", msg)
+            if not ok:
+                log.warning("Embedding dimension MISMATCH — Milvus operations may fail")
         extraction_svc = ExtractionService(
             minio_repo, hg_repo, llm_svc, prompt_svc, matcher_svc, settings,
             embed_svc=embed_svc,
@@ -66,6 +75,8 @@ async def lifespan(app: FastAPI):
             await _consumer_task
         except asyncio.CancelledError:
             pass
+    if milvus_repo is not None:
+        await milvus_repo.close()
     log.info("应用关闭")
 
 

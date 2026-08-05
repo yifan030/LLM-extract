@@ -42,6 +42,7 @@ class ExtractionService:
         # Milvus 双写依赖的两个可选服务；缺省 None 以保持向后兼容
         self._embed_svc = embed_svc
         self._milvus = milvus_repo
+        self._settings = settings
         self._output_dir = settings.output_dir if settings else "tmp/extractions"
 
     async def run(
@@ -60,9 +61,24 @@ class ExtractionService:
         # 4. LLM 抽取
         extracted = await self._llm.extract(prompt)
         # 5. 知识点匹配 (stateless matcher: level4_names passed as arg)
-        intermediate = self._matcher.match(
-            extracted, source_file=object_key, level4_names=level4_names
-        )
+        #    当 embed_svc + milvus_repo 可用时，启用模糊匹配（Milvus 向量检索兜底），
+        #    否则退化为纯字符串精确匹配。
+        if self._embed_svc is not None and self._milvus is not None:
+            threshold = self._settings.embed_kp_match_threshold if self._settings else 0.75
+            top_k = self._settings.embed_kp_top_k if self._settings else 5
+            intermediate = await self._matcher.match_fuzzy(
+                extracted,
+                source_file=object_key,
+                level4_names=level4_names,
+                embed_svc=self._embed_svc,
+                milvus_repo=self._milvus,
+                threshold=threshold,
+                top_k=top_k,
+            )
+        else:
+            intermediate = self._matcher.match(
+                extracted, source_file=object_key, level4_names=level4_names
+            )
 
         # 提取 paper_id 用于目录命名
         paper_v = intermediate.vertices[0] if intermediate.vertices else None
@@ -93,11 +109,16 @@ class ExtractionService:
                 "imported": False,
             }
 
-        # 8. 双写 Milvus（可选）：需 embed_svc + milvus_repo 同时可用。
+        # 8. 双写 Milvus（可选）：仅当真正导入 HugeGraph（KPs 必须已存在于图）时
+        #    才双写，且需 embed_svc + milvus_repo 同时可用。
         #    失败只记日志，绝不让 Milvus 拖垮抽取主流程。
         report["milvus_upserted"] = 0
         report["milvus_enabled"] = False
-        if self._embed_svc is not None and self._milvus is not None:
+        if (
+            import_to_hg
+            and self._embed_svc is not None
+            and self._milvus is not None
+        ):
             milvus_report = await self._import_to_milvus(intermediate, markdown)
             report["milvus_upserted"] = milvus_report.get("milvus_upserted", 0)
             report["milvus_enabled"] = milvus_report.get("milvus_enabled", True)
@@ -240,6 +261,15 @@ class ExtractionService:
             log.info("Milvus 双写跳过: 本次抽取无试题")
             return report
 
+        # Fail fast：先幂等建表（已存在则跳过），Milvus 不可达时立刻失败返回，
+        # 避免在昂贵的 embed API 调用上浪费（embedding 计费且慢）。
+        try:
+            await self._milvus.ensure_collections()
+        except Exception as exc:  # noqa: BLE001
+            log.error("Milvus 双写失败: 初始化 collection 出错: %s", exc)
+            report["milvus_error"] = str(exc)
+            return report
+
         # 批量 embed 所有题目正文（embedding 昂贵，一次调用尽量多）
         try:
             vectors = await self._embed_svc.embed_texts(
@@ -247,14 +277,6 @@ class ExtractionService:
             )
         except Exception as exc:  # noqa: BLE001
             log.error("Milvus 双写失败: embed 试题正文出错: %s", exc)
-            report["milvus_error"] = str(exc)
-            return report
-
-        # 幂等建表（已存在则跳过），随后分批发 upsert
-        try:
-            await self._milvus.ensure_collections()
-        except Exception as exc:  # noqa: BLE001
-            log.error("Milvus 双写失败: 初始化 collection 出错: %s", exc)
             report["milvus_error"] = str(exc)
             return report
 
