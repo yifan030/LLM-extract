@@ -94,6 +94,8 @@ services:
       - EMBED_MODEL=${EMBED_MODEL:-deepseek-embed}
       - EMBED_DIM=${EMBED_DIM:-1024}
       - EMBED_TIMEOUT=${EMBED_TIMEOUT:-60.0}
+      - EMBED_KP_MATCH_THRESHOLD=${EMBED_KP_MATCH_THRESHOLD:-0.75}
+      - EMBED_KP_TOP_K=${EMBED_KP_TOP_K:-5}
 
       # ── App ──
       - DEBUG=${DEBUG:-false}
