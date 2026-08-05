@@ -43,6 +43,21 @@ class Settings(BaseSettings):
     debug: bool = False
     output_dir: str = "tmp/extractions"
 
+    # ── Milvus ──
+    milvus_uri: str = "http://localhost:19530"
+    milvus_db: str = "default"
+    milvus_question_collection: str = "question_embed_v1"
+    milvus_kp_collection: str = "kp_embed_v1"
+
+    # ── Embedding ──
+    embed_api_key: str = ""
+    embed_base_url: str = "https://api.deepseek.com"
+    embed_model: str = "deepseek-embed"
+    embed_dim: int = 1024
+    embed_timeout: float = 60.0
+    embed_kp_match_threshold: float = 0.75
+    embed_kp_top_k: int = 5
+
     @property
     def hg_base_url(self) -> str:
         return (
