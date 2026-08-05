@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for app.utils.snowflake.Snowflake."""
-from app.utils.snowflake import Snowflake
+from utils.snowflake import Snowflake
 
 
 def test_snowflake_generates_unique_increasing_ids():

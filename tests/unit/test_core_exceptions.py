@@ -2,7 +2,7 @@
 """Tests for app.core.exceptions exception hierarchy."""
 import pytest
 
-from app.core.exceptions import (
+from core.exceptions import (
     AppError,
     MinioObjectNotFound,
     LlmApiCallError,

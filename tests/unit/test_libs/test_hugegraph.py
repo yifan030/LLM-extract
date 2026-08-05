@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from app.core.config import Settings
-from app.domain.models import Edge, Vertex
-from app.repositories.hugegraph import HugeGraphRepository
+from conf.config import Settings
+from model.models import Edge, Vertex
+from libs.hugegraph import HugeGraphRepository
 
 
 # --------------------------------------------------------------------------

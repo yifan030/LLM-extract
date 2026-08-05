@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.domain.models import (
+from model.models import (
     Edge,
     ExamPaper,
     IntermediateJson,
@@ -16,7 +16,7 @@ from app.domain.models import (
     UnmatchedItem,
     Vertex,
 )
-from app.services.extraction import ExtractionService
+from service.extraction import ExtractionService
 
 
 @pytest.mark.asyncio

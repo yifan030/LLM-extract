@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.core.exceptions import MinioObjectNotFound
-from app.repositories.minio import MinioRepository
+from core.exceptions import MinioObjectNotFound
+from libs.minio import MinioRepository
 
 
 def _make_repo() -> MinioRepository:
