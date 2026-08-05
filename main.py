@@ -14,6 +14,8 @@ from core.exceptions import AppError
 from logs.logging import get_logger
 from libs.hugegraph import HugeGraphRepository
 from libs.minio import MinioRepository
+from libs.milvus import MilvusRepository
+from service.embedding import EmbeddingService
 from service.extraction import ExtractionService
 from service.llm import LlmService
 from service.matcher import MatcherService
@@ -38,8 +40,17 @@ async def lifespan(app: FastAPI):
         llm_svc = LlmService(settings)
         prompt_svc = PromptService(hg_repo)
         matcher_svc = MatcherService()
+        # Milvus 双写：embed key 缺失时跳过 embedding，双写随之静默关闭
+        embed_svc = (
+            EmbeddingService(settings)
+            if (settings.embed_api_key or settings.llm_api_key)
+            else None
+        )
+        milvus_repo = MilvusRepository(settings)
         extraction_svc = ExtractionService(
             minio_repo, hg_repo, llm_svc, prompt_svc, matcher_svc, settings,
+            embed_svc=embed_svc,
+            milvus_repo=milvus_repo,
         )
         _consumer_task = asyncio.create_task(
             start_consumer(settings.redis_url, extraction_svc)
