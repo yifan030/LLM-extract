@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """FastAPI 应用入口。"""
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -7,16 +8,53 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from app.api.v1.router import router as v1_router
+from app.core.config import Settings
+from app.core.events import start_consumer
 from app.core.exceptions import AppError
 from app.core.logging import get_logger
+from app.repositories.hugegraph import HugeGraphRepository
+from app.repositories.minio import MinioRepository
+from app.services.extraction import ExtractionService
+from app.services.llm import LlmService
+from app.services.matcher import MatcherService
+from app.services.prompt import PromptService
 
 log = get_logger(__name__)
+
+_consumer_task: asyncio.Task | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _consumer_task
+
+    settings = Settings()
     log.info("应用启动")
+
+    # ── 启动 Redis Streams 消费者 ──
+    if settings.redis_url:
+        minio_repo = MinioRepository(settings)
+        hg_repo = HugeGraphRepository(settings)
+        llm_svc = LlmService(settings)
+        prompt_svc = PromptService(hg_repo)
+        matcher_svc = MatcherService()
+        extraction_svc = ExtractionService(
+            minio_repo, hg_repo, llm_svc, prompt_svc, matcher_svc, settings,
+        )
+        _consumer_task = asyncio.create_task(
+            start_consumer(settings.redis_url, extraction_svc)
+        )
+        log.info("Redis Stream 消费者后台任务已创建")
+
     yield
+
+    # ── 关闭 ──
+    if _consumer_task:
+        _consumer_task.cancel()
+        try:
+            await _consumer_task
+        except asyncio.CancelledError:
+            pass
     log.info("应用关闭")
 
 

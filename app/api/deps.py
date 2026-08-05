@@ -2,6 +2,7 @@
 """FastAPI 依赖注入。"""
 from functools import lru_cache
 
+import redis.asyncio as redis
 from fastapi import Depends
 
 from app.core.config import Settings
@@ -13,6 +14,7 @@ from app.services.llm import LlmService
 from app.services.matcher import MatcherService
 from app.services.minio import MinioService
 from app.services.prompt import PromptService
+from app.services.scoring import ScoringService
 
 
 @lru_cache
@@ -63,3 +65,13 @@ def get_extraction_service(
     settings: Settings = Depends(get_settings),
 ) -> ExtractionService:
     return ExtractionService(minio_repo, hg_repo, llm_svc, prompt_svc, matcher_svc, settings)
+
+
+def get_redis(settings: Settings = Depends(get_settings)) -> redis.Redis:
+    return redis.from_url(settings.redis_url)
+
+
+def get_scoring_service(
+    hg_repo: HugeGraphRepository = Depends(get_hg_repo),
+) -> ScoringService:
+    return ScoringService(hg_repo)

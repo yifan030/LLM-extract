@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # ── Redis ──
     redis_url: str = "redis://localhost:6379/0"
 
+    # ── OCR 服务 ──
+    ocr_service_url: str = "http://202.107.249.39:50108/api/v1/construct-question/ocr-parse"
+
     # ── App ──
     debug: bool = False
     output_dir: str = "tmp/extractions"

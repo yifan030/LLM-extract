@@ -5,6 +5,7 @@ from app.core.logging import get_logger
 from app.domain.schemas import (
     KnowledgePointDetail,
     KnowledgePointItem,
+    KnowledgePointRelationsResponse,
     PaginatedResponse,
     PaperDetail,
     PaperSummary,
@@ -53,6 +54,106 @@ class KnowledgeService:
             subject=props.get("subject"),
             description=props.get("description"),
             related_questions=[],
+        )
+
+    async def get_kp_relations(
+        self, kp_id: str | None = None, name: str | None = None
+    ) -> KnowledgePointRelationsResponse:
+        """查询四级知识点的关系网络。
+
+        返回：
+        - related: 与此知识点具有 ``related_kp`` 边的四级知识点
+        - ancestors: 沿 ``contains_kp`` 边向上追溯的一级/二级/三级知识点
+        """
+        # ── 1. 解析目标知识点 ──
+        if kp_id:
+            vertex = await self._hg.get_vertex(kp_id)
+        elif name:
+            kp_id = f"level_4_{name}"
+            vertex = await self._hg.get_vertex(kp_id)
+        else:
+            raise ValueError("必须提供 kp_id 或 name")
+
+        if vertex is None:
+            raise KnowledgePointNotFound(kp_id or name)
+
+        props = vertex.get("properties", {})
+        kp_name = props.get("name", "")
+        kp_level = props.get("level")
+
+        # ── 2. 查找相关知识点（related_kp 双向遍历，仅保留四级）──
+        related: list[KnowledgePointItem] = []
+        seen_related: set[str] = set()
+
+        # 出边：当前 KP → related_kp → 其他 KP
+        out_edges = await self._hg.get_vertex_edges(kp_id, direction="out", label="related_kp")
+        for e in out_edges:
+            target_id: str = e.get("inV", "")
+            if target_id and target_id not in seen_related:
+                seen_related.add(target_id)
+                target = await self._hg.get_vertex(target_id)
+                if target and target.get("properties", {}).get("level") == 4:
+                    tp = target.get("properties", {})
+                    related.append(KnowledgePointItem(
+                        kp_id=target_id,
+                        name=tp.get("name", ""),
+                        level=4,
+                        subject=tp.get("subject"),
+                    ))
+
+        # 入边：其他 KP → related_kp → 当前 KP
+        in_edges = await self._hg.get_vertex_edges(kp_id, direction="in", label="related_kp")
+        for e in in_edges:
+            source_id: str = e.get("outV", "")
+            if source_id and source_id not in seen_related:
+                seen_related.add(source_id)
+                source = await self._hg.get_vertex(source_id)
+                if source and source.get("properties", {}).get("level") == 4:
+                    sp = source.get("properties", {})
+                    related.append(KnowledgePointItem(
+                        kp_id=source_id,
+                        name=sp.get("name", ""),
+                        level=4,
+                        subject=sp.get("subject"),
+                    ))
+
+        # ── 3. 查找祖先知识点（沿 contains_kp 入边向上追溯）──
+        ancestors: list[KnowledgePointItem] = []
+        seen_ancestors: set[str] = set()
+        current_id = kp_id
+
+        # 向上遍历直到找不到父节点（最多 3 层：四级→三级→二级→一级）
+        for _ in range(3):
+            parent_edges = await self._hg.get_vertex_edges(
+                current_id, direction="in", label="contains_kp"
+            )
+            if not parent_edges:
+                break
+            # 取第一个父节点继续向上（树形层级结构，每个节点只有一个直接父节点）
+            parent_id: str = parent_edges[0].get("outV", "")
+            if not parent_id or parent_id in seen_ancestors:
+                break
+            seen_ancestors.add(parent_id)
+            parent = await self._hg.get_vertex(parent_id)
+            if parent is None:
+                break
+            pp = parent.get("properties", {})
+            parent_level = pp.get("level")
+            if parent_level in (1, 2, 3):
+                ancestors.append(KnowledgePointItem(
+                    kp_id=parent_id,
+                    name=pp.get("name", ""),
+                    level=parent_level,
+                    subject=pp.get("subject"),
+                ))
+            current_id = parent_id
+
+        return KnowledgePointRelationsResponse(
+            kp_id=kp_id,
+            name=kp_name,
+            level=kp_level,
+            related=related,
+            ancestors=ancestors,
         )
 
     async def list_papers(self, limit: int = 100, offset: int = 0) -> PaginatedResponse[PaperSummary]:
@@ -106,7 +207,7 @@ class KnowledgeService:
             kps = await self._get_question_knowledge_points(q_id)
             questions.append(QuestionDetail(
                 question_id=q_id,
-                number=str(props.get("question_id", "")),
+                number=props.get("number") or str(props.get("question_id", "")),
                 content=props.get("content", ""),
                 answer=props.get("answer"),
                 score=props.get("score"),
@@ -145,7 +246,7 @@ class KnowledgeService:
             kps = await self._get_question_knowledge_points(q_id)
             questions.append(QuestionDetail(
                 question_id=q_id,
-                number=str(props.get("question_id", "")),
+                number=props.get("number") or str(props.get("question_id", "")),
                 content=props.get("content", ""),
                 answer=props.get("answer"),
                 score=props.get("score"),

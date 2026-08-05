@@ -84,8 +84,50 @@ class KnowledgePointDetail(BaseModel):
     related_questions: list[QuestionSummary] = Field(default_factory=list)
 
 
+class KnowledgePointRelationsResponse(BaseModel):
+    """知识点关系查询响应。
+
+    包含：
+    - related: 与此知识点具有相关关系的四级知识点
+    - ancestors: 与此知识点具有直接包含关系的一级、二级、三级知识点
+    """
+    kp_id: str
+    name: str
+    level: int | None = None
+    related: list[KnowledgePointItem] = Field(default_factory=list)
+    ancestors: list[KnowledgePointItem] = Field(default_factory=list)
+
+
 class PaginatedResponse(BaseModel, Generic[T]):
     items: list[T]
     total: int
     limit: int
     offset: int
+
+
+# ── 试卷判分 ──
+
+class ScoringRequest(BaseModel):
+    paper_id: str = Field(..., description="试卷 ID，用于从数据库查询标准答案")
+
+
+class QuestionScore(BaseModel):
+    number: str = Field(..., description="题号")
+    content: str = Field(default="", description="题目内容")
+    image_urls: list[str] = Field(default_factory=list, description="题目中的图片 URL")
+    student_answer: str | None = Field(default=None, description="学生作答")
+    standard_answer: str | None = Field(default=None, description="标准答案（来自数据库或参考答案）")
+    knowledge_points: list[str] = Field(default_factory=list, description="关联知识点（由后续流程填充）")
+
+
+class SectionScore(BaseModel):
+    type: str = Field(..., description="题型：选择题/填空题/解答题")
+    score_per_question: int | None = Field(default=None, description="每题分值")
+    questions: list[QuestionScore] = Field(default_factory=list)
+
+
+class ScoringResponse(BaseModel):
+    paper_title: str = Field(default="", description="试卷标题")
+    paper_id: str = Field(default="", description="试卷 ID")
+    total_score: int | None = Field(default=None, description="试卷总分")
+    sections: list[SectionScore] = Field(default_factory=list)

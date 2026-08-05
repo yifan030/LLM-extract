@@ -55,7 +55,11 @@ class LlmService:
         except ValidationError as exc:
             raise LlmApiCallError(f"LLM 输出结构校验失败: {exc}") from exc
 
-    async def _call_llm(self, prompt: str) -> str:
+    async def _call_llm(self, prompt: str, max_tokens: int | None = None) -> str:
+        """调用 LLM，当输出因长度截断时自动以更大 ``max_tokens`` 重试一次。"""
+        if max_tokens is None:
+            max_tokens = self._config.max_tokens
+
         try:
             response = await self.client.chat.completions.create(
                 model=self._config.model,
@@ -64,18 +68,31 @@ class LlmService:
                     {"role": "user", "content": prompt},
                 ],
                 temperature=self._config.temperature,
-                max_tokens=self._config.max_tokens,
+                max_tokens=max_tokens,
             )
         except Exception as exc:
             raise LlmApiCallError(f"LLM API 调用失败: {exc}") from exc
 
         choice = response.choices[0]
-        if getattr(choice, "finish_reason", None) == "length":
-            log.warning("LLM 输出因长度被截断 (max_tokens=%d)", self._config.max_tokens)
-
         content = choice.message.content
         if content is None:
             raise LlmApiCallError("LLM 返回内容为空")
+
+        if getattr(choice, "finish_reason", None) == "length":
+            # 自动扩容重试一次
+            next_tokens = max_tokens * 2
+            limit = 32768
+            if next_tokens <= limit:
+                log.warning(
+                    "LLM 输出截断 (max_tokens=%d)，自动扩容重试 (max_tokens=%d)",
+                    max_tokens, next_tokens,
+                )
+                return await self._call_llm(prompt, max_tokens=next_tokens)
+            log.error("LLM 输出截断且已达上限 (max_tokens=%d)", max_tokens)
+            raise LlmApiCallError(
+                f"LLM 输出因长度被截断 (max_tokens={max_tokens}，已达上限)"
+            )
+
         return content
 
     @staticmethod

@@ -125,13 +125,12 @@ class MatcherService:
         type_id = self._resolve_question_type_id(q.question_type, question_types)
         return {
             "question_id": q_int_id,
+            "number": q.number,
             "content": q.content,
             "answer": q.answer,
             "score": q.score,
             "question_type_id": type_id,
             "exam_paper_id": paper_int_id,
-            "source_file_id": 0,
-            "sub_file_id": 0,
             "created_at": now,
             "updated_at": now,
         }

@@ -26,7 +26,8 @@
 │   │           ├── extraction.py # 抽取流水线端点
 │   │           ├── knowledge.py  # 知识点查询
 │   │           ├── minio.py      # MinIO 文件浏览 + webhook
-│   │           └── papers.py     # 试卷与题目查询
+│   │           ├── papers.py     # 试卷与题目查询
+│   │           └── scoring.py    # OCR markdown 解析（判分）
 │   ├── core/
 │   │   ├── config.py            # pydantic-settings 配置中心
 │   │   ├── events.py            # Redis Streams 消费者
@@ -44,7 +45,8 @@
 │   │   ├── llm.py               # AsyncOpenAI LLM 调用
 │   │   ├── matcher.py           # 候选知识点严格匹配
 │   │   ├── minio.py             # MinIO 文件浏览服务
-│   │   └── prompt.py            # Prompt 构建
+│   │   ├── prompt.py            # Prompt 构建
+│   │   └── scoring.py           # OCR markdown 解析（不走 LLM）
 │   └── utils/
 │       └── snowflake.py         # 简易雪花 ID 生成器
 ├── prompts/
@@ -176,6 +178,7 @@ python -m app.cli \
 | `GET` | `/api/v1/papers/{paper_id}` | 试卷详情 |
 | `GET` | `/api/v1/papers/{paper_id}/questions` | 试卷题目列表 |
 | `GET` | `/api/v1/questions/{question_id}` | 题目详情 |
+| `POST` | `/api/v1/scoring/parse` | OCR markdown 解析为判分 JSON（不走 LLM） |
 
 ### 抽取请求参数
 
@@ -192,6 +195,86 @@ python -m app.cli \
 | `object_key` | string | 必填 | MinIO 文件路径 |
 | `save_artifacts` | bool | `false` | 是否将 LLM 输出和中间 JSON 落盘到 `tmp/extractions/` |
 | `import_to_hg` | bool | `true` | 是否导入 HugeGraph |
+
+## OCR Markdown 解析（判分）
+
+```
+POST /api/v1/scoring/parse
+```
+
+将 OCR 输出的试卷 markdown 解析为结构化 JSON，纯规则解析不走 LLM。用于提取学生作答与标准答案，供后续判分流程使用。
+
+**请求**：
+
+```json
+{
+  "markdown": "<OCR 输出的完整 markdown 文本>",
+  "paper_id": "paper_890e5428fd13..."
+}
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `markdown` | string | 是 | OCR 输出的 markdown 文本 |
+| `paper_id` | string | 是 | 试卷 ID，用于从 HugeGraph 查询标准答案 |
+
+**响应**：
+
+```json
+{
+  "paper_title": "长郡中学 2023 级高一入学检测试卷",
+  "paper_id": "paper_890e5428fd13...",
+  "total_score": 100,
+  "sections": [
+    {
+      "type": "选择题",
+      "score_per_question": 4,
+      "questions": [
+        {
+          "number": "1",
+          "content": "已知 a 是 √13 的小数部分...",
+          "image_urls": [
+            "http://minio:9000/.../img.jpg?X-Amz-..."
+          ],
+          "student_answer": "B",
+          "standard_answer": "B",
+          "knowledge_points": []
+        }
+      ]
+    },
+    {
+      "type": "填空题",
+      "score_per_question": 4,
+      "questions": [
+        {
+          "number": "9",
+          "content": "点 P 关于原点的对称点为 ___.",
+          "image_urls": [],
+          "student_answer": null,
+          "standard_answer": "(3,-2)",
+          "knowledge_points": []
+        }
+      ]
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `number` | string | 题号 |
+| `content` | string | 题目内容（含 LaTeX、HTML 图片标签） |
+| `image_urls` | string[] | 题目中的图片 URL 列表 |
+| `student_answer` | string\|null | 从答题卡表格提取的学生作答 |
+| `standard_answer` | string\|null | 标准答案，优先查 HugeGraph，否则从参考答案区域提取 |
+| `knowledge_points` | string[] | 关联知识点，预留字段由后续流程填充 |
+| `score_per_question` | int\|null | 该题型每题原始分值，从 section 标题提取 |
+
+**解析逻辑**：
+- **选择题**：从答题卡 `<table>` 提取学生选项，从参考答案 `<table>` 提取标准答案
+- **填空题**：从参考答案区域文本行（如 `9. (3,-2)`）提取标准答案
+- **解答题**：标准答案为 null，需人工评阅
+- **图片 URL**：从题目内容中的 `<img src="...">` 标签提取，MinIO 预签名 URL 有时效性
 
 ## 幂等性
 
