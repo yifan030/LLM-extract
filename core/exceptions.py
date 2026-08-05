@@ -51,3 +51,12 @@ class PaperNotFound(AppError):
 class ExtractionValidationError(AppError):
     def __init__(self, message: str, detail: dict | None = None):
         super().__init__(message, status_code=422, detail=detail)
+
+
+class SearchServiceError(AppError):
+    """向量搜索服务错误（Milvus 不可用 / Embedding 未配置或调用失败）。
+
+    使用 503 表示依赖的外部服务当前不可用，由全局 exception_handler 返回 JSON。
+    """
+    def __init__(self, message: str, detail: dict | None = None):
+        super().__init__(message, status_code=503, detail=detail)

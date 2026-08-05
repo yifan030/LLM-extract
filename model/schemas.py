@@ -131,3 +131,31 @@ class ScoringResponse(BaseModel):
     paper_id: str = Field(default="", description="试卷 ID")
     total_score: int | None = Field(default=None, description="试卷总分")
     sections: list[SectionScore] = Field(default_factory=list)
+
+
+# ── 向量搜索 ──
+
+class SearchRequest(BaseModel):
+    query: str = Field(..., description="搜索查询文本")
+    kp_level: int | None = Field(default=None, ge=1, le=4, description="知识点层级过滤 (1-4)")
+    kp_name: str | None = Field(default=None, description="知识点名称过滤")
+    limit: int = Field(default=10, ge=1, le=100, description="返回结果数量")
+
+
+class SearchHit(BaseModel):
+    question_id: str
+    paper_id: str
+    number: str
+    content: str
+    question_type: str
+    kp_names_l1: list[str] = Field(default_factory=list)
+    kp_names_l2: list[str] = Field(default_factory=list)
+    kp_names_l3: list[str] = Field(default_factory=list)
+    kp_names_l4: list[str] = Field(default_factory=list)
+
+
+class SearchResponse(BaseModel):
+    query: str
+    kp_filter: str | None = None
+    hits: list[SearchHit]
+    total: int
