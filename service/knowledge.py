@@ -215,6 +215,8 @@ class KnowledgeService:
                 exam_paper_id=str(props.get("exam_paper_id", "")),
                 exam_paper_title=paper_title,
                 knowledge_points=kps,
+                img_url=props.get("img_urls") or [],
+                answer_img=props.get("answer_imgs") or [],
             ))
         return questions
 
@@ -254,6 +256,8 @@ class KnowledgeService:
                 exam_paper_id=paper_id_prop,
                 exam_paper_title=paper_title,
                 knowledge_points=kps,
+                img_url=props.get("img_urls") or [],
+                answer_img=props.get("answer_imgs") or [],
             ))
         return questions
 
@@ -276,6 +280,7 @@ class KnowledgeService:
             exam_paper_id=str(props.get("exam_paper_id", "")),
             exam_paper_title=paper_title,
             knowledge_points=kps,
+            img_url=props.get("img_url"),
         )
 
     # ── 辅助方法 ────────────────────────────────────────────
@@ -308,3 +313,5 @@ class KnowledgeService:
         if type_id is None:
             return ""
         return _TYPE_ID_TO_NAME.get(int(type_id), str(type_id))
+
+

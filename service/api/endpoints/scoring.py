@@ -15,12 +15,18 @@ router = APIRouter()
 
 @router.post("/scoring/parse", response_model=ScoringResponse)
 async def parse_for_scoring(
-    paper_id: str = Form(..., description="试卷 ID，用于从数据库查询标准答案"),
+    paper_id: str | None = Form(
+        default=None,
+        description="试卷 ID（可选；提供时为答题卡模式，否则为完整试卷模式）",
+    ),
     file: UploadFile = File(..., description="要解析的 PDF 文件"),
     svc: ScoringService = Depends(get_scoring_service),
     settings: Settings = Depends(get_settings),
 ):
-    """上传 PDF 试卷，调用 OCR 服务解析后返回判分 JSON，不经过 LLM。"""
+    """上传 PDF 试卷，调用 OCR 服务解析后返回判分 JSON，不经过 LLM。
+
+    传 paper_id 时按答题卡模式处理（结合数据库）；不传时按完整试卷模式纯解析。
+    """
     # 1. 将上传的文件转发给 OCR 服务
     ocr_markdown = await _call_ocr_service(file, settings.ocr_service_url)
 

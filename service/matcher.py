@@ -302,6 +302,8 @@ class MatcherService:
             "score": q.score,
             "question_type_id": type_id,
             "exam_paper_id": paper_int_id,
+            "img_urls": q.img_url if q.img_url else None,
+            "answer_imgs": q.answer_img if q.answer_img else None,
             "created_at": now,
             "updated_at": now,
         }

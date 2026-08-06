@@ -54,6 +54,8 @@ class QuestionSummary(BaseModel):
     content: str
     question_type: str
     knowledge_points: list[str] = Field(default_factory=list)
+    img_url: list[str] = Field(default_factory=list)
+    answer_img: list[str] = Field(default_factory=list)
 
 
 class QuestionDetail(BaseModel):
@@ -66,6 +68,8 @@ class QuestionDetail(BaseModel):
     exam_paper_id: str
     exam_paper_title: str
     knowledge_points: list[str] = Field(default_factory=list)
+    img_url: list[str] = Field(default_factory=list)
+    answer_img: list[str] = Field(default_factory=list)
 
 
 class KnowledgePointItem(BaseModel):
@@ -108,7 +112,10 @@ class PaginatedResponse(BaseModel, Generic[T]):
 # ── 试卷判分 ──
 
 class ScoringRequest(BaseModel):
-    paper_id: str = Field(..., description="试卷 ID，用于从数据库查询标准答案")
+    paper_id: str | None = Field(
+        default=None,
+        description="试卷 ID（可选；提供时为答题卡模式，否则为完整试卷模式）",
+    )
 
 
 class QuestionScore(BaseModel):

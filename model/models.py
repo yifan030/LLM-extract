@@ -25,6 +25,8 @@ class Question(BaseModel):
     score: int | None = None
     question_type: str
     candidate_knowledge_points: list[str] = Field(default_factory=list)
+    img_url: list[str] = Field(default_factory=list)
+    answer_img: list[str] = Field(default_factory=list)
 
 
 class LlmExtractResult(BaseModel):
