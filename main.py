@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """FastAPI 应用入口。"""
 import asyncio
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -11,6 +12,7 @@ from service.api.router import router as v1_router
 from conf.config import Settings
 from core.events import start_consumer
 from core.exceptions import AppError
+from logs.context import set_correlation_id, get_correlation_id
 from logs.logging import get_logger
 from libs.hugegraph import HugeGraphRepository
 from libs.minio import MinioRepository
@@ -88,6 +90,14 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    @app_.middleware("http")
+    async def correlation_id_middleware(request: Request, call_next):
+        cid = request.headers.get("X-Correlation-Id") or uuid.uuid4().hex[:12]
+        set_correlation_id(cid)
+        response = await call_next(request)
+        response.headers["X-Correlation-Id"] = cid
+        return response
+
     app_.include_router(v1_router, prefix="/api/v1")
 
     @app_.get("/health")
@@ -96,9 +106,11 @@ def create_app() -> FastAPI:
 
     @app_.exception_handler(AppError)
     async def app_error_handler(request: Request, exc: AppError):
+        detail = dict(exc.detail)
+        detail["correlation_id"] = get_correlation_id()
         return JSONResponse(
             status_code=exc.status_code,
-            content={"error": exc.message, "detail": exc.detail},
+            content={"error": exc.message, "detail": detail},
         )
 
     @app_.exception_handler(ValidationError)
@@ -110,10 +122,11 @@ def create_app() -> FastAPI:
 
     @app_.exception_handler(Exception)
     async def unhandled_error_handler(request: Request, exc: Exception):
-        log.exception("未处理异常")
+        cid = get_correlation_id()
+        log.exception("未处理异常 [cid=%s]", cid)
         return JSONResponse(
             status_code=500,
-            content={"error": "内部服务错误"},
+            content={"error": "内部服务错误", "correlation_id": cid},
         )
 
     return app_
