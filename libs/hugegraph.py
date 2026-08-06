@@ -11,12 +11,15 @@ from typing import Any
 import httpx
 
 from conf.config import Settings
+from core.exceptions import HugeGraphTimeout
+from logs.decorators import log_step
 from logs.logging import get_logger
 from model.models import Edge, Vertex
 
 log = get_logger(__name__)
 
 
+@log_step
 class HugeGraphRepository:
     """Async data-access layer over HugeGraph's REST API."""
 
@@ -35,10 +38,16 @@ class HugeGraphRepository:
     async def load_level4_names(self) -> list[str]:
         """加载所有 level=4 的知识点名称。"""
         url = f"{self.base_url}/graph/vertices?label=knowledge_point&limit=10000"
-        async with await self._client() as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            data = resp.json()
+        try:
+            async with await self._client() as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.TimeoutException as exc:
+            raise HugeGraphTimeout(
+                f"HugeGraph GET 顶点列表 超时: {url}",
+                detail={"url": url},
+            ) from exc
         names: list[str] = []
         for v in data.get("vertices", []):
             props = v.get("properties", {})
@@ -52,13 +61,19 @@ class HugeGraphRepository:
         """预加载题型 name -> 物理 id 映射。"""
         url = f"{self.base_url}/graph/vertices?label=question_type"
         cache: dict[str, str] = {}
-        async with await self._client() as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            for v in resp.json().get("vertices", []):
-                name = v.get("properties", {}).get("name")
-                if name:
-                    cache[name] = v.get("id")
+        try:
+            async with await self._client() as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                for v in resp.json().get("vertices", []):
+                    name = v.get("properties", {}).get("name")
+                    if name:
+                        cache[name] = v.get("id")
+        except httpx.TimeoutException as exc:
+            raise HugeGraphTimeout(
+                f"HugeGraph GET 顶点列表 超时: {url}",
+                detail={"url": url},
+            ) from exc
         return cache
 
     async def create_vertex(self, vertex: Vertex) -> tuple[bool, bool]:
@@ -74,8 +89,14 @@ class HugeGraphRepository:
             "properties": vertex.properties,
         }
         url = f"{self.base_url}/graph/vertices"
-        async with await self._client() as client:
-            resp = await client.post(url, json=payload)
+        try:
+            async with await self._client() as client:
+                resp = await client.post(url, json=payload)
+        except httpx.TimeoutException as exc:
+            raise HugeGraphTimeout(
+                f"HugeGraph POST vertices 超时: {url}",
+                detail={"url": url, "vertex_label": vertex.label, "vertex_id": vertex.id},
+            ) from exc
         if resp.status_code in (200, 201):
             log.info("顶点创建成功: %s (%s)", vertex.label, vertex.id)
             return True, False
@@ -98,8 +119,14 @@ class HugeGraphRepository:
             "inV": edge.inV,
             "properties": edge.properties,
         }
-        async with await self._client() as client:
-            resp = await client.post(url, json=payload)
+        try:
+            async with await self._client() as client:
+                resp = await client.post(url, json=payload)
+        except httpx.TimeoutException as exc:
+            raise HugeGraphTimeout(
+                f"HugeGraph POST edges 超时: {url}",
+                detail={"url": url, "edge_label": edge.label},
+            ) from exc
         if resp.status_code in (200, 201):
             log.info("边创建成功: %s -[%s]-> %s", edge.outV, edge.label, edge.inV)
             return True, False
@@ -116,10 +143,16 @@ class HugeGraphRepository:
         url = f"{self.base_url}/graph/vertices?label={label}&limit={limit}"
         if offset:
             url += f"&offset={offset}"
-        async with await self._client() as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            return resp.json().get("vertices", [])
+        try:
+            async with await self._client() as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                return resp.json().get("vertices", [])
+        except httpx.TimeoutException as exc:
+            raise HugeGraphTimeout(
+                f"HugeGraph GET 顶点列表 超时: {url}",
+                detail={"url": url, "label": label},
+            ) from exc
 
     async def count_vertices(self, label: str) -> int:
         """估算指定 label 的顶点总数（依赖响应中的 ``total`` 字段）。"""
@@ -136,12 +169,18 @@ class HugeGraphRepository:
         否则会被误解析为 Number 类型。
         """
         url = f'{self.base_url}/graph/vertices/"{vertex_id}"'
-        async with await self._client() as client:
-            resp = await client.get(url)
-            if resp.status_code == 404:
-                return None
-            resp.raise_for_status()
-            return resp.json()
+        try:
+            async with await self._client() as client:
+                resp = await client.get(url)
+                if resp.status_code == 404:
+                    return None
+                resp.raise_for_status()
+                return resp.json()
+        except httpx.TimeoutException as exc:
+            raise HugeGraphTimeout(
+                f"HugeGraph GET 顶点 超时: {url}",
+                detail={"url": url, "vertex_id": vertex_id},
+            ) from exc
 
     async def get_vertex_edges(
         self, vertex_id: str, direction: str = "OUT", label: str | None = None
@@ -154,7 +193,13 @@ class HugeGraphRepository:
         url = f'{self.base_url}/graph/edges?vertex_id=%22{vertex_id}%22&direction={direction.upper()}'
         if label:
             url += f"&label={label}"
-        async with await self._client() as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            return resp.json().get("edges", [])
+        try:
+            async with await self._client() as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                return resp.json().get("edges", [])
+        except httpx.TimeoutException as exc:
+            raise HugeGraphTimeout(
+                f"HugeGraph GET 边列表 超时: {url}",
+                detail={"url": url, "vertex_id": vertex_id, "direction": direction.upper()},
+            ) from exc

@@ -3,13 +3,15 @@
 from miniopy_async import Minio  # type: ignore
 
 from conf.config import Settings
-from core.exceptions import MinioObjectNotFound
+from core.exceptions import MinioObjectNotFound, MinioTimeout
+from logs.decorators import log_step
 from logs.logging import get_logger
 from model.schemas import MinioFileItem
 
 log = get_logger(__name__)
 
 
+@log_step
 class MinioRepository:
     """Async data-access layer over MinIO (via miniopy_async)."""
 
@@ -52,5 +54,12 @@ class MinioRepository:
         except MinioObjectNotFound:
             raise
         except Exception as exc:
+            # 区分连接超时与真正的 MinIO 错误
+            err_str = str(exc).lower()
+            if "timeout" in err_str or "timed out" in err_str:
+                raise MinioTimeout(
+                    f"MinIO 连接超时: {object_key}",
+                    detail={"object_key": object_key},
+                ) from exc
             log.error("读取 MinIO 文件失败: %s, err=%s", object_key, exc)
             raise MinioObjectNotFound(object_key) from exc
