@@ -21,8 +21,5 @@ __pycache__/
 docs/
 reference/
 
-# 测试
-tests/
-
 # Superpowers 工作区
 .superpowers/
