@@ -127,6 +127,8 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=500,
             content={"error": "内部服务错误", "correlation_id": cid},
+            headers={"X-Correlation-Id": cid},
+        )
         )
 
     return app_

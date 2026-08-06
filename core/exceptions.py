@@ -65,7 +65,7 @@ class SearchServiceError(AppError):
 class ExternalServiceError(AppError):
     """外部服务调用失败（超时/连接拒绝/DNS 解析失败等）。"""
     def __init__(self, service: str, message: str, detail: dict | None = None):
-        d = detail or {}
+        d = dict(detail or {})
         d["service"] = service
         super().__init__(message, status_code=502, detail=d)
 

@@ -18,13 +18,15 @@ class _CorrelIdFilter(logging.Filter):
 def get_logger(name: str) -> logging.Logger:
     global _CONFIGURED
     if not _CONFIGURED:
+        fmt = "%(asctime)s [%(levelname)s] [%(cid)s] %(name)s: %(message)s"
         logging.basicConfig(
             level=logging.INFO,
-            format="%(asctime)s [%(levelname)s] [%(cid)s] %(name)s: %(message)s",
+            format=fmt,
         )
+        # Attach to root handler so third-party loggers (httpx, redis, etc.) never
+        # hit KeyError on %(cid)s — the handler-level filter runs for every record.
+        for handler in logging.getLogger().handlers:
+            handler.addFilter(_CorrelIdFilter())
         _CONFIGURED = True
 
-    logger = logging.getLogger(name)
-    if not any(isinstance(f, _CorrelIdFilter) for f in logger.filters):
-        logger.addFilter(_CorrelIdFilter())
-    return logger
+    return logging.getLogger(name)
