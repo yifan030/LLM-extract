@@ -60,3 +60,36 @@ class SearchServiceError(AppError):
     """
     def __init__(self, message: str, detail: dict | None = None):
         super().__init__(message, status_code=503, detail=detail)
+
+
+class ExternalServiceError(AppError):
+    """外部服务调用失败（超时/连接拒绝/DNS 解析失败等）。"""
+    def __init__(self, service: str, message: str, detail: dict | None = None):
+        d = detail or {}
+        d["service"] = service
+        super().__init__(message, status_code=502, detail=d)
+
+
+class HugeGraphTimeout(ExternalServiceError):
+    def __init__(self, message: str, detail: dict | None = None):
+        super().__init__("hugegraph", message, detail)
+
+
+class MilvusTimeout(ExternalServiceError):
+    def __init__(self, message: str, detail: dict | None = None):
+        super().__init__("milvus", message, detail)
+
+
+class MinioTimeout(ExternalServiceError):
+    def __init__(self, message: str, detail: dict | None = None):
+        super().__init__("minio", message, detail)
+
+
+class OcrServiceError(ExternalServiceError):
+    def __init__(self, message: str, detail: dict | None = None):
+        super().__init__("ocr", message, detail)
+
+
+class RedisTimeout(ExternalServiceError):
+    def __init__(self, message: str, detail: dict | None = None):
+        super().__init__("redis", message, detail)
