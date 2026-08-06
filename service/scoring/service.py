@@ -2,6 +2,7 @@
 """试卷判分服务 —— 纯 markdown 解析，不走模型逻辑。"""
 import re
 
+from logs.decorators import log_step
 from logs.logging import get_logger
 from model.schemas import QuestionScore, ScoringResponse, SectionScore
 from model.schemas import QuestionDetail  # noqa: F401 — 类型标注引用
@@ -42,6 +43,7 @@ def _derive_section_score(scores: list[int]) -> int | None:
     return max(counts, key=lambda k: (counts[k], k))
 
 
+@log_step
 class ScoringService:
     """试卷判分服务 —— 纯规则解析 markdown，不调用 LLM。"""
 

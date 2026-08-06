@@ -4,6 +4,7 @@ import json
 import os
 
 from conf.config import Settings
+from logs.decorators import log_step
 from logs.logging import get_logger
 from libs.hugegraph import HugeGraphRepository
 from libs.minio import MinioRepository
@@ -22,6 +23,7 @@ _KP_ARRAY_CAPACITY: dict[int, int] = {1: 8, 2: 16, 3: 32, 4: 32}
 _MILVUS_BATCH_SIZE = 50
 
 
+@log_step
 class ExtractionService:
     def __init__(
         self,

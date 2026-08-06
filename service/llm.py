@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from conf.config import Settings
 from core.exceptions import LlmApiCallError
+from logs.decorators import log_step
 from logs.logging import get_logger
 from model.models import LlmExtractResult
 
@@ -25,6 +26,7 @@ class LlmConfig:
     timeout: float = 120.0
 
 
+@log_step
 class LlmService:
     def __init__(self, settings: Settings):
         self._config = LlmConfig(
