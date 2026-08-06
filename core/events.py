@@ -4,6 +4,7 @@ import asyncio
 
 import redis.asyncio as redis
 
+from logs.context import set_correlation_id
 from logs.logging import get_logger
 
 log = get_logger(__name__)
@@ -56,6 +57,7 @@ async def start_consumer(redis_url: str, extraction_svc):
                     object_key = fields.get(b"object_key", b"").decode()
                     if not object_key:
                         continue
+                    set_correlation_id()  # 每条消息生成新的 cid
                     log.info("消费事件: %s → %s", msg_id, object_key)
                     try:
                         await extraction_svc.run(object_key)
