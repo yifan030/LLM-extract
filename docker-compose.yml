@@ -1,39 +1,71 @@
 # ============================================================
-# Exam Extract API — Docker Compose 部署
+# Exam Extract API — Docker Compose 本地开发环境
 #
 # 用法:
-#   docker compose up -d              # 启动
+#   docker compose up -d              # 启动所有服务
+#   docker compose up -d api          # 仅启动 API + 依赖
 #   docker compose logs -f            # 查看日志
 #   docker compose down               # 停止
-#   docker compose build --no-cache   # 重新构建
+#   docker compose build --no-cache   # 重新构建 API 镜像
 # ============================================================
+
+x-common: &default-network
+  networks:
+    - app-network
+
 services:
+  # ── Milvus 元数据存储 ──────────────────────────────────
   etcd:
     image: quay.io/coreos/etcd:v3.5.5
     container_name: milvus-etcd
+    <<: *default-network
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
       - ETCD_AUTO_COMPACTION_RETENTION=1000
       - ETCD_QUOTA_BACKEND_BYTES=4294967296
       - ETCD_SNAPSHOT_COUNT=50000
-    command: ["etcd", "-advertise-client-urls=http://127.0.0.1:2379",
-              "-listen-client-urls", "http://0.0.0.0:2379", "--data-dir", "/etcd"]
+    command:
+      - etcd
+      - -advertise-client-urls=http://127.0.0.1:2379
+      - -listen-client-urls=http://0.0.0.0:2379
+      - --data-dir=/etcd
     volumes:
       - ./volumes/etcd:/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
+  # ── Milvus 内部对象存储 ───────────────────────────────
   milvus-minio:
     image: minio/minio:RELEASE.2023-03-20T20-16-18Z
     container_name: milvus-minio
+    <<: *default-network
     environment:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
-    command: ["minio", "server", "/minio_data", "--console-address", ":9001"]
+    command:
+      - minio
+      - server
+      - /minio_data
+      - --console-address
+      - ":9001"
     volumes:
       - ./volumes/milvus-minio:/minio_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
+  # ── Milvus 向量数据库 ──────────────────────────────────
   milvus:
     image: milvusdb/milvus:v2.5.4
     container_name: milvus-standalone
+    <<: *default-network
     command: ["milvus", "run", "standalone"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -44,14 +76,68 @@ services:
       - "19530:19530"
       - "9091:9091"
     depends_on:
-      - etcd
-      - milvus-minio
+      etcd:
+        condition: service_healthy
+      milvus-minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
+  # ── 应用对象存储 (MinIO) ─────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: llm-minio
+    <<: *default-network
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command:
+      - minio
+      - server
+      - /data
+      - --console-address
+      - ":9001"
+    volumes:
+      - llm-construct-question_minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── Redis ──────────────────────────────────────────────
+  redis:
+    image: redis:6.0.8
+    container_name: redis
+    <<: *default-network
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./volumes/redis:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # ── API 服务 ──────────────────────────────────────────
   api:
     image: exam-extract:1.0
     container_name: exam-extract
+    <<: *default-network
     restart: unless-stopped
-    network_mode: host
+    ports:
+      - "8000:8085"
     environment:
       # ── LLM ──
       - LLM_API_KEY=${LLM_API_KEY}
@@ -62,16 +148,16 @@ services:
       - LLM_TIMEOUT=${LLM_TIMEOUT:-120.0}
 
       # ── MinIO ──
-      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
-      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
-      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
       - MINIO_BUCKET=${MINIO_BUCKET:-llm-construct}
       - MINIO_SECURE=${MINIO_SECURE:-false}
 
       # ── Redis ──
-      - REDIS_URL=${REDIS_URL}
+      - REDIS_URL=redis://redis:6379/0
 
-      # ── HugeGraph ──
+      # ── HugeGraph (外部服务) ──
       - HG_HOST=${HG_HOST}
       - HG_PORT=${HG_PORT:-50045}
       - HG_USER=${HG_USER:-admin}
@@ -79,19 +165,19 @@ services:
       - HG_GRAPHSPACE=${HG_GRAPHSPACE:-DEFAULT}
       - HG_GRAPH=${HG_GRAPH:-edu}
 
-      # ── OCR 服务 ──
+      # ── OCR 服务 (外部) ──
       - OCR_SERVICE_URL=${OCR_SERVICE_URL:-http://202.107.249.39:50108/api/v1/construct-question/ocr-parse}
 
       # ── Milvus ──
-      - MILVUS_URI=${MILVUS_URI:-http://localhost:19530}
+      - MILVUS_URI=http://milvus:19530
       - MILVUS_DB=${MILVUS_DB:-default}
       - MILVUS_QUESTION_COLLECTION=${MILVUS_QUESTION_COLLECTION:-question_embed_v1}
       - MILVUS_KP_COLLECTION=${MILVUS_KP_COLLECTION:-kp_embed_v1}
 
       # ── Embedding ──
-      - EMBED_API_KEY=${EMBED_API_KEY:-}
-      - EMBED_BASE_URL=${EMBED_BASE_URL:-https://api.deepseek.com}
-      - EMBED_MODEL=${EMBED_MODEL:-deepseek-embed}
+      - EMBED_BASE_URL=${EMBED_BASE_URL:-}
+      - EMBED_ENDPOINT=${EMBED_ENDPOINT:-/api/bgem3/encoder}
+      - EMBED_LOAD_SERVICE=${EMBED_LOAD_SERVICE:-llm_search}
       - EMBED_DIM=${EMBED_DIM:-1024}
       - EMBED_TIMEOUT=${EMBED_TIMEOUT:-60.0}
       - EMBED_KP_MATCH_THRESHOLD=${EMBED_KP_MATCH_THRESHOLD:-0.75}
@@ -101,5 +187,20 @@ services:
       - DEBUG=${DEBUG:-false}
       - OUTPUT_DIR=${OUTPUT_DIR:-tmp/extractions}
     volumes:
-      # 持久化临时输出（可选）
       - ./tmp:/app/tmp
+    depends_on:
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+
+networks:
+  app-network:
+    driver: bridge
+    name: app-network
+
+volumes:
+  llm-construct-question_minio_data:
+    external: true
