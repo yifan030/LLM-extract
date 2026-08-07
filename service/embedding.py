@@ -1,30 +1,25 @@
 # -*- coding: utf-8 -*-
-"""Embedding 调用服务 — 基于 AsyncOpenAI 的 OpenAI 兼容 /v1/embeddings 调用。"""
-from openai import AsyncOpenAI
+"""Embedding 服务。"""
 
 from conf.config import Settings
+from libs.embed_client import EmbedClient
 from logs.logging import get_logger
 
 
 class EmbeddingService:
     def __init__(self, settings: Settings):
-        api_key = settings.embed_api_key or settings.llm_api_key
-        self._client = AsyncOpenAI(
-            api_key=api_key,
+        self._client = EmbedClient(
             base_url=settings.embed_base_url,
+            endpoint=settings.embed_endpoint,
+            load_service=settings.embed_load_service,
             timeout=settings.embed_timeout,
         )
-        self._model = settings.embed_model
         self._dim = settings.embed_dim
         self._log = get_logger(__name__)
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """批量向量化。返回向量列表，顺序与输入一致。"""
-        resp = await self._client.embeddings.create(
-            model=self._model,
-            input=texts,
-        )
-        return [item.embedding for item in resp.data]
+        return await self._client.encode(texts)
 
     async def embed_one(self, text: str) -> list[float]:
         """向量化单条文本。返回单个向量。"""

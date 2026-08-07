@@ -4,7 +4,7 @@ import re
 
 from logs.decorators import log_step
 from logs.logging import get_logger
-from model.schemas import QuestionScore, ScoringResponse, SectionScore
+from model.schemas import QuestionScore, ScoringResponse
 from model.schemas import QuestionDetail  # noqa: F401 — 类型标注引用
 from libs.hugegraph import HugeGraphRepository
 from service.knowledge import KnowledgeService
@@ -104,32 +104,28 @@ class ScoringService:
             sec_type = _DB_TYPE_TO_SECTION.get(q.question_type, q.question_type or "")
             grouped.setdefault(sec_type, []).append(q)
 
-        # 5. 组装 section（固定题型顺序，题目按题号排序）
-        sections: list[SectionScore] = []
+        # 5. 组装试题列表（按题型顺序 + 题号排序）
+        all_questions: list[QuestionScore] = []
         ordered_types = [t for t in _SECTION_ORDER if t in grouped]
         ordered_types += [t for t in grouped if t not in _SECTION_ORDER]
         for sec_type in ordered_types:
             qs = sorted(grouped[sec_type], key=lambda q: _num_sort_key(q.number))
-            q_scores = [
-                QuestionScore(
+            for q in qs:
+                all_questions.append(QuestionScore(
                     number=q.number,
+                    question_id=q.question_id,
                     content=q.content or "",
-                    image_urls=_extract_image_urls(q.content or "")
-                    + markdown_images.get(q.number, []),
                     student_answer=student_answers.get(q.number),
                     standard_answer=q.answer,
+                    score=q.score,
+                    question_type=q.question_type,
+                    exam_paper_id=q.exam_paper_id,
+                    exam_paper_title=q.exam_paper_title,
                     knowledge_points=list(q.knowledge_points),
-                )
-                for q in qs
-            ]
-            score_per_q = _derive_section_score(
-                [q.score for q in qs if q.score is not None],
-            )
-            sections.append(SectionScore(
-                type=sec_type,
-                score_per_question=score_per_q,
-                questions=q_scores,
-            ))
+                    img_url=list(q.img_url),
+                    answer_img=list(q.answer_img),
+                    student_img=markdown_images.get(q.number, []),
+                ))
 
         # 6. 试卷标题：优先数据库试卷标题，其次 markdown 标题
         paper_title = db_questions[0].exam_paper_title if db_questions else ""
@@ -144,7 +140,7 @@ class ScoringService:
             paper_title=paper_title,
             paper_id=paper_id,
             total_score=total_score,
-            sections=sections,
+            questions=all_questions,
         )
 
     # ── 完整试卷模式：纯 markdown 解析，不走数据库 ──────────────
@@ -157,49 +153,33 @@ class ScoringService:
         # 2. 提取学生答案（答题卡表格）
         student_answers = _extract_student_answers(markdown)
 
-        # 3. 按题型分区
+        # 3. 按题型分区提取所有试题
         section_ranges = _find_section_ranges(markdown)
 
-        # 4. 构建 section 输出
-        sections: list[SectionScore] = []
-
+        all_numbers: list[str] = []
         for section_type, sec_start, sec_end in section_ranges:
-            questions_raw = _extract_questions_from_range(
-                markdown, sec_start, sec_end, section_type,
-            )
+            for q in _extract_questions_from_range(markdown, sec_start, sec_end, section_type):
+                all_numbers.append(q["number"])
+        student_images = _extract_images_from_markdown(markdown, all_numbers)
 
-            q_scores: list[QuestionScore] = []
-            for q in questions_raw:
+        # 4. 构建试题列表
+        questions: list[QuestionScore] = []
+        for section_type, sec_start, sec_end in section_ranges:
+            for q in _extract_questions_from_range(markdown, sec_start, sec_end, section_type):
                 num = q["number"]
                 content = q.get("content", "")
-                stu_ans = student_answers.get(num)
-                image_urls = _extract_image_urls(content)
-
-                q_scores.append(QuestionScore(
+                questions.append(QuestionScore(
                     number=num,
                     content=content,
-                    image_urls=image_urls,
-                    student_answer=stu_ans,
+                    student_answer=student_answers.get(num),
                     standard_answer=None,
                     knowledge_points=[],
+                    student_img=student_images.get(num, []),
                 ))
-
-            # 从 section 标题提取每题原始分值，如 "每小题4分"
-            score_per_q: int | None = None
-            chunk = markdown[sec_start:sec_start + 200]
-            spm = re.search(r"每(?:小)?题\s*(\d+)\s*分", chunk)
-            if spm:
-                score_per_q = int(spm.group(1))
-
-            sections.append(SectionScore(
-                type=section_type,
-                score_per_question=score_per_q,
-                questions=q_scores,
-            ))
 
         return ScoringResponse(
             paper_title=meta["title"],
             paper_id="",
             total_score=meta["total_score"],
-            sections=sections,
+            questions=questions,
         )

@@ -274,7 +274,7 @@ class MatcherService:
         return None, "BELOW_SIM_THRESHOLD"
 
     def _build_paper_props(self, paper: ExamPaper, paper_int_id: int, now: str) -> dict:
-        return {
+        props = {
             "exam_paper_id": paper_int_id,
             "title": paper.title,
             "subject": paper.subject,
@@ -284,6 +284,7 @@ class MatcherService:
             "created_at": now,
             "updated_at": now,
         }
+        return {k: v for k, v in props.items() if v is not None}
 
     def _build_question_props(
         self,
@@ -294,7 +295,7 @@ class MatcherService:
         now: str,
     ) -> dict:
         type_id = self._resolve_question_type_id(q.question_type, question_types)
-        return {
+        props = {
             "question_id": q_int_id,
             "number": q.number,
             "content": q.content,
@@ -302,11 +303,12 @@ class MatcherService:
             "score": q.score,
             "question_type_id": type_id,
             "exam_paper_id": paper_int_id,
-            "img_urls": q.img_url if q.img_url else None,
-            "answer_imgs": q.answer_img if q.answer_img else None,
+            "img_urls": q.img_url if q.img_url else [],
+            "answer_imgs": q.answer_img if q.answer_img else [],
             "created_at": now,
             "updated_at": now,
         }
+        return {k: v for k, v in props.items() if v is not None}
 
     def _resolve_question_type_id(self, name: str, question_types: list[QuestionType]) -> int:
         mapping = {"单选题": 1, "多选题": 2, "填空题": 3, "解答题": 4}

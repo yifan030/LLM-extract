@@ -56,12 +56,8 @@ def get_milvus_repo(settings: Settings = Depends(get_settings)) -> MilvusReposit
 def get_embed_svc(
     settings: Settings = Depends(get_settings),
 ) -> EmbeddingService | None:
-    """Embedding 服务（进程级单例）；未配置 API key 时返回 None。
-
-    EmbeddingService 在构造时即创建 OpenAI 客户端，若 embed/llm API key 均为空
-    会抛错，因此这里显式判空以避免在未启用 embedding 的环境中断言失败。
-    """
-    if not (settings.embed_api_key or settings.llm_api_key):
+    """Embedding 服务（进程级单例）；未配置服务地址时返回 None。"""
+    if not settings.embed_base_url:
         return None
     return EmbeddingService(settings)
 

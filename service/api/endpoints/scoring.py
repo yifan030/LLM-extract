@@ -31,7 +31,9 @@ async def parse_for_scoring(
     ocr_markdown = await _call_ocr_service(file, settings.ocr_service_url)
 
     # 2. 用 ScoringService 解析拼接后的 markdown
-    return await svc.parse(ocr_markdown, paper_id)
+    result = await svc.parse(ocr_markdown, paper_id)
+    result.ocr_markdown = ocr_markdown
+    return result
 
 
 async def _call_ocr_service(file: UploadFile, ocr_url: str) -> str:

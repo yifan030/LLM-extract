@@ -80,7 +80,7 @@ class HugeGraphRepository:
         """创建顶点，返回 ``(created, duplicated)``。
 
         200/201 -> created；400 且文案含 "already exists" -> duplicated；
-        其余情况二者皆 False。
+        其余情况二者皆 False（schema 拒绝、服务端异常等）。
         """
         payload = {
             "label": vertex.label,
@@ -103,7 +103,18 @@ class HugeGraphRepository:
         if resp.status_code == 400 and "already exists" in resp.text.lower():
             log.debug("顶点已存在，跳过: %s (%s)", vertex.label, vertex.id)
             return False, True
-        log.error("顶点创建失败: %s (%s): %s", vertex.label, vertex.id, resp.text)
+        # 400 非 duplicate / 5xx 等：尝试提取 HugeGraph 返回的错误消息
+        reason = resp.text
+        try:
+            body = resp.json()
+            reason = body.get("message", reason)
+        except Exception:  # noqa: BLE001
+            pass
+        log.error(
+            "顶点创建失败: label=%s id=%s status=%d reason=%s payload_keys=%s",
+            vertex.label, vertex.id, resp.status_code, reason,
+            list(vertex.properties.keys()),
+        )
         return False, False
 
     async def create_edge(self, edge: Edge) -> tuple[bool, bool]:
