@@ -50,9 +50,9 @@ class Settings(BaseSettings):
     milvus_kp_collection: str = "kp_embed_v1"
 
     # ── Embedding ──
-    embed_api_key: str = ""
-    embed_base_url: str = "https://api.deepseek.com"
-    embed_model: str = "deepseek-embed"
+    embed_base_url: str = ""
+    embed_endpoint: str = "/api/bgem3/encoder"
+    embed_load_service: str = "llm_search"
     embed_dim: int = 1024
     embed_timeout: float = 60.0
     embed_kp_match_threshold: float = 0.75
