@@ -46,20 +46,32 @@ def get_matcher_service() -> MatcherService:
     return MatcherService()
 
 
-@lru_cache
+_milvus_repo: MilvusRepository | None = None
+_embed_svc: EmbeddingService | None = None
+_embed_svc_sentinel = object()
+
+
 def get_milvus_repo(settings: Settings = Depends(get_settings)) -> MilvusRepository:
     """Milvus 长连接仓库（进程级单例，client 惰性创建）。"""
-    return MilvusRepository(settings)
+    global _milvus_repo
+    if _milvus_repo is None:
+        _milvus_repo = MilvusRepository(settings)
+    return _milvus_repo
 
 
-@lru_cache
 def get_embed_svc(
     settings: Settings = Depends(get_settings),
 ) -> EmbeddingService | None:
     """Embedding 服务（进程级单例）；未配置服务地址时返回 None。"""
-    if not settings.embed_base_url:
+    global _embed_svc
+    if _embed_svc is _embed_svc_sentinel:
         return None
-    return EmbeddingService(settings)
+    if _embed_svc is None:
+        if not settings.embed_base_url:
+            _embed_svc = _embed_svc_sentinel
+            return None
+        _embed_svc = EmbeddingService(settings)
+    return _embed_svc
 
 
 def get_minio_service(
