@@ -9,6 +9,9 @@ MilvusRepository 是数据访问层对 Milvus 的封装：基于 pymilvus 的
 长连接、重量级对象，因此这里复用一个 client（惰性创建一次），而不是
 每次调用都新建。
 """
+import asyncio
+from functools import wraps
+
 from pymilvus import (
     AnnSearchRequest,
     AsyncMilvusClient,
@@ -17,11 +20,52 @@ from pymilvus import (
     FunctionType,
     RRFRanker,
 )
+from pymilvus.exceptions import MilvusException
 
 from conf.config import Settings
 from logs.logging import get_logger
 
 log = get_logger(__name__)
+
+# 重试配置：仅对 Milvus gRPC 层瞬时错误重试
+_MAX_RETRIES = 3
+_RETRY_BACKOFF = [0.1, 0.3, 0.7]  # 秒
+
+
+def _retry_on_transient_error(func):
+    """异步重试装饰器：对 MilvusException / 网络超时等瞬时错误自动重试。
+
+    最多 ``_MAX_RETRIES`` 次，退避间隔见 ``_RETRY_BACKOFF``。
+    schema 错误 / 参数错误等非瞬时异常会立即上抛，不浪费重试。
+    """
+
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        last_exc: Exception | None = None
+        for attempt in range(_MAX_RETRIES):
+            try:
+                return await func(*args, **kwargs)
+            except MilvusException as exc:
+                last_exc = exc
+                if attempt < _MAX_RETRIES - 1:
+                    delay = _RETRY_BACKOFF[attempt]
+                    log.warning(
+                        "Milvus 调用失败 (attempt %d/%d)，%s 后重试: %s",
+                        attempt + 1, _MAX_RETRIES, delay, exc,
+                    )
+                    await asyncio.sleep(delay)
+            except asyncio.TimeoutError as exc:
+                last_exc = exc
+                if attempt < _MAX_RETRIES - 1:
+                    delay = _RETRY_BACKOFF[attempt]
+                    log.warning(
+                        "Milvus 调用超时 (attempt %d/%d)，%s 后重试: %s",
+                        attempt + 1, _MAX_RETRIES, delay, exc,
+                    )
+                    await asyncio.sleep(delay)
+        raise last_exc  # type: ignore[misc]
+
+    return wrapper
 
 
 class MilvusRepository:
@@ -87,17 +131,10 @@ class MilvusRepository:
         log.info("collection 已加载: %s", name)
 
     async def _collection_exists(self, name: str) -> bool:
-        """检查 collection 是否存在。
-
-        ``AsyncMilvusClient``（pymilvus 2.5.x）未暴露 ``has_collection``，
-        这里改用底层异步连接的 ``describe_collection`` 实现等价的判断。
-        """
-        conn = self._get_client()._get_connection()
-        try:
-            await conn.describe_collection(name, timeout=5.0)
-            return True
-        except Exception:
-            return False
+        """检查 collection 是否存在（通过 ``list_collections`` 公开 API）。"""
+        client = self._get_client()
+        collections = await client.list_collections()
+        return name in collections
 
     def _build_question_schema(self, client: AsyncMilvusClient):
         """题目 collection 的 schema（含 ``content`` 的 BM25 Function）。"""
@@ -241,6 +278,7 @@ class MilvusRepository:
 
     # ── 写入 ──────────────────────────────────────────────────────
 
+    @_retry_on_transient_error
     async def upsert_question(self, data: list[dict]) -> None:
         """插入/更新题目行。
 
@@ -254,6 +292,7 @@ class MilvusRepository:
         )
         log.info("upsert 题目 %d 条", len(data))
 
+    @_retry_on_transient_error
     async def upsert_kp(self, data: list[dict]) -> None:
         """插入/更新知识点行（``data`` 含全部标量字段 + ``dense_vector``）。"""
         client = self._get_client()
@@ -265,6 +304,7 @@ class MilvusRepository:
 
     # ── 检索 ──────────────────────────────────────────────────────
 
+    @_retry_on_transient_error
     async def hybrid_search_questions(
         self, query_vec, expr, limit, output_fields, query_text: str = "",
     ) -> list[dict]:
@@ -279,18 +319,19 @@ class MilvusRepository:
         hit 结构为 ``{"id", "distance", "entity": {...}}``。
         """
         client = self._get_client()
+        fetch_limit = limit * 5
         dense_req = AnnSearchRequest(
             data=[query_vec],
             anns_field="dense_vector",
-            param={"metric_type": "COSINE", "params": {"ef": 64}},
-            limit=limit * 5,
+            param={"metric_type": "COSINE", "params": {"ef": max(64, fetch_limit)}},
+            limit=fetch_limit,
             expr=expr,
         )
         sparse_req = AnnSearchRequest(
             data=[query_text],
             anns_field="sparse_vector",
             param={"metric_type": "BM25"},
-            limit=limit * 5,
+            limit=fetch_limit,
             expr=expr,
         )
         results = await client.hybrid_search(
@@ -302,6 +343,7 @@ class MilvusRepository:
         )
         return self._normalize_hits(results)
 
+    @_retry_on_transient_error
     async def search_kps(self, query_vec, limit, level=4, expr=None) -> list[dict]:
         """按 dense 向量在知识点 collection 中检索。
 

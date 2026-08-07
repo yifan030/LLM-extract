@@ -52,6 +52,8 @@ async def lifespan(app: FastAPI):
             else None
         )
         milvus_repo = MilvusRepository(settings)
+        # 启动时幂等建表（已存在则跳过），后续双写不再重复检查
+        await milvus_repo.ensure_collections()
         # 启动自检：校验 embedding 维度与 Milvus schema 一致（失败只告警，不阻断启动）
         if embed_svc is not None:
             ok, msg = await embed_svc.check_dimension()

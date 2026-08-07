@@ -10,7 +10,7 @@ from libs.hugegraph import HugeGraphRepository
 from libs.minio import MinioRepository
 from service.llm import LlmService
 from service.matcher import MatcherService
-from service.prompt import PromptService
+from service.prompt import PromptService, load_level4_names
 
 log = get_logger(__name__)
 
@@ -56,9 +56,9 @@ class ExtractionService:
         log.info("开始抽取流水线: object_key=%s", object_key)
         # 1. 从 MinIO 读取 Markdown
         markdown = await self._minio.get_object_text(object_key)
-        # 2. 加载四级知识点名称（一次加载，复用给 prompt + matcher）
-        level4_names = await self._hg.load_level4_names()
-        # 3. 构建 Prompt（同步版本，传入已加载的知识点，避免重复查询 HugeGraph）
+        # 2. 从静态文件加载四级知识点名称（一次加载，复用给 prompt + matcher）
+        level4_names = load_level4_names()
+        # 3. 构建 Prompt
         prompt = self._prompt.build_prompt_sync(markdown, level4_names)
         # 4. LLM 抽取
         extracted = await self._llm.extract(prompt)
@@ -134,12 +134,15 @@ class ExtractionService:
 
         vertices_created = 0
         vertices_duplicated = 0
+        vertices_failed = 0
         for v in data.vertices:
             created, dup = await self._hg.create_vertex(v)
             if created:
                 vertices_created += 1
-            if dup:
+            elif dup:
                 vertices_duplicated += 1
+            else:
+                vertices_failed += 1
 
         edges_created = 0
         edges_duplicated = 0
@@ -171,6 +174,7 @@ class ExtractionService:
             "imported": True,
             "vertices_created": vertices_created,
             "vertices_duplicated": vertices_duplicated,
+            "vertices_failed": vertices_failed,
             "edges_created": edges_created,
             "edges_duplicated": edges_duplicated,
             "edges_failed": edges_failed,
@@ -185,6 +189,9 @@ class ExtractionService:
         向上遍历得到；每题的 level-4 KP 取自 ``examines`` 边的 ``inV``。
         所有 Milvus/Embedding 操作都包裹在 try/except 中——失败只记日志并返回
         统计，绝不让双写异常拖垮抽取主流程。
+
+        前置条件：调用方需在启动阶段通过 ``MilvusRepository.ensure_collections()``
+        确保 collection 已存在并已加载；本方法不再重复检查。
 
         ``markdown`` 为源文档原始文本（保留入参以兼容调用方契约，当前仅审计用）。
         """
@@ -261,15 +268,6 @@ class ExtractionService:
 
         if not rows:
             log.info("Milvus 双写跳过: 本次抽取无试题")
-            return report
-
-        # Fail fast：先幂等建表（已存在则跳过），Milvus 不可达时立刻失败返回，
-        # 避免在昂贵的 embed API 调用上浪费（embedding 计费且慢）。
-        try:
-            await self._milvus.ensure_collections()
-        except Exception as exc:  # noqa: BLE001
-            log.error("Milvus 双写失败: 初始化 collection 出错: %s", exc)
-            report["milvus_error"] = str(exc)
             return report
 
         # 批量 embed 所有题目正文（embedding 昂贵，一次调用尽量多）
