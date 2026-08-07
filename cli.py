@@ -27,10 +27,10 @@ async def main():
     llm_svc = LlmService(settings)
     prompt_svc = PromptService(hg_repo)
     matcher_svc = MatcherService()
-    # Milvus 双写：embed key 缺失时跳过 embedding，双写随之静默关闭
+    # Milvus 双写：未配置 embedding 服务时跳过
     embed_svc = (
         EmbeddingService(settings)
-        if (settings.embed_api_key or settings.llm_api_key)
+        if settings.embed_base_url
         else None
     )
     milvus_repo = MilvusRepository(settings)
