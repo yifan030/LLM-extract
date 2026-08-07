@@ -120,24 +120,27 @@ class ScoringRequest(BaseModel):
 
 class QuestionScore(BaseModel):
     number: str = Field(..., description="题号")
+    question_id: str = Field(default="", description="试题 ID（数据库主键）")
     content: str = Field(default="", description="题目内容")
-    image_urls: list[str] = Field(default_factory=list, description="题目中的图片 URL")
+    # image_urls: list[str] = Field(default_factory=list, description="题目中的图片 URL（从 OCR markdown 提取）")
     student_answer: str | None = Field(default=None, description="学生作答")
     standard_answer: str | None = Field(default=None, description="标准答案（来自数据库或参考答案）")
+    score: int | None = Field(default=None, description="本题分值")
+    question_type: str = Field(default="", description="题型：单选题/多选题/填空题/解答题")
+    exam_paper_id: str = Field(default="", description="所属试卷 ID")
+    exam_paper_title: str = Field(default="", description="所属试卷标题")
     knowledge_points: list[str] = Field(default_factory=list, description="关联知识点（由后续流程填充）")
-
-
-class SectionScore(BaseModel):
-    type: str = Field(..., description="题型：选择题/填空题/解答题")
-    score_per_question: int | None = Field(default=None, description="每题分值")
-    questions: list[QuestionScore] = Field(default_factory=list)
+    img_url: list[str] = Field(default_factory=list, description="试题图片 URL（数据库存储）")
+    answer_img: list[str] = Field(default_factory=list, description="答案图片 URL（数据库存储）")
+    student_img: list[str] = Field(default_factory=list, description="学生答题卡图片 URL")
 
 
 class ScoringResponse(BaseModel):
     paper_title: str = Field(default="", description="试卷标题")
     paper_id: str = Field(default="", description="试卷 ID")
     total_score: int | None = Field(default=None, description="试卷总分")
-    sections: list[SectionScore] = Field(default_factory=list)
+    questions: list[QuestionScore] = Field(default_factory=list)
+    ocr_markdown: str = Field(default="", description="OCR 原始 markdown（调试用）")
 
 
 # ── 向量搜索 ──
