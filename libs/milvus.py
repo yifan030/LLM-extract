@@ -18,6 +18,7 @@ from pymilvus import (
     DataType,
     Function,
     FunctionType,
+    MilvusClient,
     RRFRanker,
 )
 from pymilvus.exceptions import MilvusException
@@ -91,13 +92,37 @@ class MilvusRepository:
             await self._client.close()
             self._client = None
 
-    # ── Collection 管理 ────────────────────────────────────────────
+    # ── Database / Collection 管理 ─────────────────────────────────
+
+    async def ensure_database(self) -> None:
+        """幂等创建目标 database（不存在则创建）。
+
+        AsyncMilvusClient 某些版本没有 create_db，这里用同步 MilvusClient
+        在线程中执行数据库管理操作。
+        """
+        db_name = self._settings.milvus_db
+
+        def _sync_ensure():
+            client = MilvusClient(uri=self._settings.milvus_uri, db_name="default")
+            try:
+                databases = client.list_databases()
+                if db_name in databases:
+                    log.info("database 已存在，跳过创建: %s", db_name)
+                else:
+                    client.create_database(db_name)
+                    log.info("创建 database 成功: %s", db_name)
+            finally:
+                client.close()
+
+        await asyncio.to_thread(_sync_ensure)
 
     async def ensure_collections(self) -> None:
         """幂等创建两个 collection（schema + 索引 + BM25 Function）并加载。
 
-        collection 已存在则跳过创建；重复调用仍会确保集合已 load，安全幂等。
+        先确保 database 存在，再确保 collection 存在。
+        已存在则跳过；重复调用安全幂等。
         """
+        await self.ensure_database()
         client = self._get_client()
         await self._ensure_collection(
             self._settings.milvus_question_collection,
