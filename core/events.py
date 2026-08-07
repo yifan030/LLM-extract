@@ -19,7 +19,7 @@ CONSUMER_NAME = "worker-1"
 async def publish_event(redis_url: str, object_key: str) -> str | None:
     """将 MinIO 对象事件写入 Redis Stream，返回消息 ID；失败返回 None。"""
     try:
-        r = redis.from_url(redis_url)
+        r = redis.from_url(redis_url, socket_keepalive=True)
         msg_id = await r.xadd(STREAM_KEY, {"object_key": object_key}, maxlen=10000)
         log.info("已发布事件: %s → %s", object_key, msg_id)
         await r.close()
@@ -34,7 +34,7 @@ async def publish_event(redis_url: str, object_key: str) -> str | None:
 
 async def start_consumer(redis_url: str, extraction_svc):
     """后台消费 Redis Stream 中的 MinIO 事件。"""
-    r = redis.from_url(redis_url)
+    r = redis.from_url(redis_url, socket_keepalive=True, health_check_interval=30)
 
     try:
         await r.xgroup_create(STREAM_KEY, CONSUMER_GROUP, id="0", mkstream=True)
@@ -69,6 +69,9 @@ async def start_consumer(redis_url: str, extraction_svc):
         except asyncio.CancelledError:
             log.info("消费者被取消，正在停止...")
             break
+        except (TimeoutError, ConnectionError, OSError) as exc:
+            # Redis 阻塞读取超时 / 连接抖动，正常现象，静默重试
+            await asyncio.sleep(1)
         except Exception as exc:
             log.error("消费者循环异常: %s", exc)
             await asyncio.sleep(5)
