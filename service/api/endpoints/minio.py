@@ -1,4 +1,6 @@
 """MinIO 文件浏览 + webhook 端点。"""
+from urllib.parse import unquote
+
 from fastapi import APIRouter, Depends, Query, Request
 
 from service.api.deps import get_minio_service, get_redis
@@ -25,7 +27,7 @@ async def minio_webhook(request: Request, r=Depends(get_redis)):
     """MinIO bucket notification 回调 — 写入 Redis Stream 触发抽取流水线。"""
     body = await request.json()
     for record in body.get("Records", []):
-        key = record.get("s3", {}).get("object", {}).get("key", "")
+        key = unquote(record.get("s3", {}).get("object", {}).get("key", ""))
         if key.endswith(".md"):
             log.info("收到 MinIO 事件: %s, 发布到 Redis Stream", key)
             await r.xadd("extract:events", {"object_key": key}, maxlen=10000)
