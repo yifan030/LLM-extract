@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
+from service.api.deps import set_mysql_repo
 from service.api.router import router as v1_router
 from conf.config import Settings
 from core.events import start_consumer
@@ -44,8 +45,15 @@ async def lifespan(app: FastAPI):
     # ── 启动 MySQL 连接池（独立导入 API 使用，不依赖 Redis 消费者）──
     if settings.mysql_url:
         mysql_repo = MySqlRepository(settings)
-        await mysql_repo.init_tables()
-        log.info("MySQL 连接池已建立，表结构已就绪")
+        try:
+            await mysql_repo.init_tables()
+            log.info("MySQL 连接池已建立，表结构已就绪")
+        except Exception as exc:
+            log.warning("MySQL 初始化失败（API 仍可启动）: %s", exc)
+            await mysql_repo.close()
+            mysql_repo = None
+        # DI 注入复用 lifespan 管理的实例（失败时为 None，避免创建第二个引擎）
+        set_mysql_repo(mysql_repo)
 
     # ── 启动 Redis Streams 消费者 ──
     if settings.redis_url:

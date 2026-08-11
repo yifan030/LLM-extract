@@ -144,9 +144,10 @@ class TestMySqlImportService:
         minio_repo, mysql_repo, llm_svc, prompt_svc = mock_deps
         paper_id = gen_paper_id("papers/test.md")
 
-        # MinIO 图片响应（read/release 均为异步）
+        # MinIO 图片响应（aiohttp ClientResponse：read 异步、release 同步）
         img_response = AsyncMock()
         img_response.read.return_value = b"\xff\xd8fake-jpeg"
+        img_response.release = MagicMock()
         minio_repo._client.get_object.return_value = img_response
 
         async def fake_find_one(table, where):

@@ -118,8 +118,14 @@ def get_scoring_service(
 _mysql_repo: MySqlRepository | None = None
 
 
+def set_mysql_repo(repo: MySqlRepository | None) -> None:
+    """由 main.py lifespan 注入进程级单例（避免 DI 创建第二个引擎）。"""
+    global _mysql_repo
+    _mysql_repo = repo
+
+
 def get_mysql_repo(settings: Settings = Depends(get_settings)) -> MySqlRepository:
-    """MySQL 长连接仓库（进程级单例）。"""
+    """MySQL 长连接仓库（进程级单例，优先复用 lifespan 管理的实例）。"""
     global _mysql_repo
     if _mysql_repo is None:
         _mysql_repo = MySqlRepository(settings)

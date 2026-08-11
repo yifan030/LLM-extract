@@ -140,6 +140,20 @@ class MySqlImportService:
 
         parsed_answers = _extract_student_answers(answers_md)
 
+        if not parsed_answers:
+            log.warning("未检测到答题卡表格格式，尝试 markdown 切分...")
+            # Try markdown-based extraction as fallback for standard answer formats
+            try:
+                from service.scoring.extraction import _extract_answers_from_markdown
+                questions = await self._mysql.find_all(
+                    "questions", {"exam_paper_id": paper_id}, limit=100
+                )
+                numbers = [q["number"] for q in questions]
+                if numbers:
+                    parsed_answers = _extract_answers_from_markdown(answers_md, numbers)
+            except Exception:
+                pass
+
         # 4. 批量 UPDATE questions.answer
         updated = 0
         for number, answer_text in parsed_answers.items():
@@ -184,7 +198,7 @@ class MySqlImportService:
                 self._minio.bucket, object_key
             )
             image_bytes = await response.read()
-            await response.release()  # aiohttp 的 release() 是协程，必须 await
+            response.release()  # aiohttp 的 release() 是同步方法（见 libs/minio.py 同款用法）
         except Exception as exc:
             from core.exceptions import MinioObjectNotFound
             raise MinioObjectNotFound(object_key) from exc
