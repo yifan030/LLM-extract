@@ -11,6 +11,8 @@ from model.mysql_schemas import (
     AnswerSheetImportRequest,
     AnswerSheetImportResponse,
     CsvExportRequest,
+    RecommendRequest,
+    RecommendResponse,
 )
 from service.api.deps import get_mysql_import_service
 from service.mysql_import import MySqlImportService
@@ -60,4 +62,15 @@ async def export_csv(
         zip_path,
         media_type="application/zip",
         filename="mysql_export.zip",
+    )
+
+
+@router.post("/recommend/weak-kp", response_model=RecommendResponse, tags=["mysql"])
+async def recommend_weak_kp(
+    req: RecommendRequest,
+    svc: MySqlImportService = Depends(get_mysql_import_service),
+):
+    """查找薄弱知识点（正确率 < threshold）并推荐同类题。"""
+    return await svc.get_weak_kp_recommend(
+        req.student_id, req.exam_paper_id, req.accuracy_threshold
     )

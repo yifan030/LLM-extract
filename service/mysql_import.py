@@ -318,3 +318,89 @@ class MySqlImportService:
 
         log.info("CSV 导出完成: tables=%s, zip=%s", tables, zip_path)
         return zip_path
+
+    async def get_weak_kp_recommend(
+        self,
+        student_id: int,
+        exam_paper_id: str,
+        accuracy_threshold: float = 0.6,
+    ) -> RecommendResponse:
+        """薄弱知识点推荐：找到正确率 < threshold 的知识点并推荐同类题。
+
+        注意：questions.knowledge_point_ids 存的是 LLM 抽取的知识点名称字符串
+        （如 ["交集", "并集"]），因此与 knowledge_points 表按 name 关联。
+        """
+        # 查询薄弱知识点
+        # JSON_TABLE 按名称展开 knowledge_point_ids，与 knowledge_points.name 关联
+        weak_sql = """
+        SELECT kp.id, kp.name,
+               COUNT(*) AS total,
+               SUM(a.is_correct) AS correct,
+               ROUND(SUM(a.is_correct) / COUNT(*), 2) AS accuracy
+        FROM answer_sheets a
+        JOIN questions q ON a.question_id = q.id
+        JOIN JSON_TABLE(q.knowledge_point_ids, '$[*]'
+             COLUMNS (kp_name VARCHAR(100) PATH '$')) jt
+        JOIN knowledge_points kp ON kp.name = jt.kp_name
+        WHERE a.student_id = :student_id
+          AND a.exam_paper_id = :exam_paper_id
+          AND a.is_correct IS NOT NULL
+        GROUP BY kp.id, kp.name
+        HAVING accuracy < :threshold
+        """
+        weak_rows = await self._mysql._execute(weak_sql, {
+            "student_id": student_id,
+            "exam_paper_id": exam_paper_id,
+            "threshold": accuracy_threshold,
+        })
+
+        weak_kps = [
+            WeakKnowledgePoint(
+                kp_id=r["id"],
+                kp_name=r["name"],
+                total=r["total"],
+                correct=r["correct"],
+                accuracy=r["accuracy"],
+            )
+            for r in weak_rows
+        ]
+
+        # 为每个薄弱知识点推荐同类题（按知识点名称匹配）
+        all_recommended: list[RecommendQuestion] = []
+        seen_ids: set[str] = set()
+        for kp in weak_kps:
+            rec_sql = """
+            SELECT q.id, q.number, q.content, q.question_type, q.difficulty
+            FROM questions q
+            WHERE JSON_CONTAINS(q.knowledge_point_ids, :kp_name_json)
+              AND q.id NOT IN (
+                  SELECT question_id FROM answer_sheets WHERE student_id = :student_id
+              )
+            ORDER BY q.difficulty
+            LIMIT 5
+            """
+            rec_rows = await self._mysql._execute(rec_sql, {
+                "kp_name_json": json.dumps(kp.kp_name),
+                "student_id": student_id,
+            })
+            for r in rec_rows:
+                if r["id"] not in seen_ids:
+                    seen_ids.add(r["id"])
+                    all_recommended.append(RecommendQuestion(
+                        id=r["id"],
+                        number=r["number"],
+                        content=r["content"][:200] if r["content"] else "",
+                        question_type=r["question_type"],
+                        difficulty=r["difficulty"],
+                    ))
+
+        log.info(
+            "薄弱知识点推荐完成: student_id=%d, weak_kps=%d, recommended=%d",
+            student_id, len(weak_kps), len(all_recommended),
+        )
+        return RecommendResponse(
+            student_id=student_id,
+            exam_paper_id=exam_paper_id,
+            weak_knowledge_points=weak_kps,
+            recommended_questions=all_recommended,
+        )
