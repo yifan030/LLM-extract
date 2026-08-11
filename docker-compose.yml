@@ -174,6 +174,9 @@ services:
       - MILVUS_QUESTION_COLLECTION=${MILVUS_QUESTION_COLLECTION:-question_embed_v1}
       - MILVUS_KP_COLLECTION=${MILVUS_KP_COLLECTION:-kp_embed_v1}
 
+      # ── MySQL (共享中间件: mysql:3306) ──
+      - MYSQL_URL=mysql+aiomysql://root:root@mysql:3306/llm_construct
+
       # ── Embedding ──
       - EMBED_BASE_URL=${EMBED_BASE_URL:-}
       - EMBED_ENDPOINT=${EMBED_ENDPOINT:-/api/bgem3/encoder}
