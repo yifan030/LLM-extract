@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
+from service.api.deps import set_mysql_repo
 from service.api.router import router as v1_router
 from conf.config import Settings
 from core.events import start_consumer
@@ -17,6 +18,7 @@ from logs.logging import get_logger
 from libs.hugegraph import HugeGraphRepository
 from libs.minio import MinioRepository
 from libs.milvus import MilvusRepository
+from libs.mysql import MySqlRepository
 from service.embedding import EmbeddingService
 from service.extraction import ExtractionService
 from service.llm import LlmService
@@ -37,6 +39,21 @@ async def lifespan(app: FastAPI):
 
     # Milvus 长连接仓库（client 惰性创建）；关闭阶段需显式释放
     milvus_repo: MilvusRepository | None = None
+    # MySQL 长连接仓库（连接池惰性创建）；关闭阶段需显式释放
+    mysql_repo: MySqlRepository | None = None
+
+    # ── 启动 MySQL 连接池（独立导入 API 使用，不依赖 Redis 消费者）──
+    if settings.mysql_url:
+        mysql_repo = MySqlRepository(settings)
+        try:
+            await mysql_repo.init_tables()
+            log.info("MySQL 连接池已建立，表结构已就绪")
+        except Exception as exc:
+            log.warning("MySQL 初始化失败（API 仍可启动）: %s", exc)
+            await mysql_repo.close()
+            mysql_repo = None
+        # DI 注入复用 lifespan 管理的实例（失败时为 None，避免创建第二个引擎）
+        set_mysql_repo(mysql_repo)
 
     # ── 启动 Redis Streams 消费者 ──
     if settings.redis_url:
@@ -81,6 +98,8 @@ async def lifespan(app: FastAPI):
             pass
     if milvus_repo is not None:
         await milvus_repo.close()
+    if mysql_repo is not None:
+        await mysql_repo.close()
     log.info("应用关闭")
 
 

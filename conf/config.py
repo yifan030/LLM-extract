@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     milvus_question_collection: str = "question_embed_v1"
     milvus_kp_collection: str = "kp_embed_v1"
 
+    # ── MySQL ──
+    mysql_url: str = "mysql+aiomysql://root:root@localhost:3306/llm_construct"
+
     # ── Embedding ──
     embed_base_url: str = ""
     embed_endpoint: str = "/api/bgem3/encoder"
