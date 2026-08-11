@@ -93,3 +93,9 @@ class OcrServiceError(ExternalServiceError):
 class RedisTimeout(ExternalServiceError):
     def __init__(self, message: str, detail: dict | None = None):
         super().__init__("redis", message, detail)
+
+
+class MySqlError(AppError):
+    """MySQL 操作失败（连接超时 / 查询错误 / 约束冲突）。"""
+    def __init__(self, message: str, detail: dict | None = None):
+        super().__init__(message, status_code=502, detail=detail)
