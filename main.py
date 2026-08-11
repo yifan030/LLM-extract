@@ -17,6 +17,7 @@ from logs.logging import get_logger
 from libs.hugegraph import HugeGraphRepository
 from libs.minio import MinioRepository
 from libs.milvus import MilvusRepository
+from libs.mysql import MySqlRepository
 from service.embedding import EmbeddingService
 from service.extraction import ExtractionService
 from service.llm import LlmService
@@ -37,6 +38,14 @@ async def lifespan(app: FastAPI):
 
     # Milvus 长连接仓库（client 惰性创建）；关闭阶段需显式释放
     milvus_repo: MilvusRepository | None = None
+    # MySQL 长连接仓库（连接池惰性创建）；关闭阶段需显式释放
+    mysql_repo: MySqlRepository | None = None
+
+    # ── 启动 MySQL 连接池（独立导入 API 使用，不依赖 Redis 消费者）──
+    if settings.mysql_url:
+        mysql_repo = MySqlRepository(settings)
+        await mysql_repo.init_tables()
+        log.info("MySQL 连接池已建立，表结构已就绪")
 
     # ── 启动 Redis Streams 消费者 ──
     if settings.redis_url:
@@ -81,6 +90,8 @@ async def lifespan(app: FastAPI):
             pass
     if milvus_repo is not None:
         await milvus_repo.close()
+    if mysql_repo is not None:
+        await mysql_repo.close()
     log.info("应用关闭")
 
 
