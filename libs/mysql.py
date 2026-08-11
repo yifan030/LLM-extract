@@ -1,0 +1,185 @@
+# -*- coding: utf-8 -*-
+"""MySQL 异步仓库层 — 连接池、建表、CRUD。"""
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
+from sqlalchemy import text
+
+from conf.config import Settings
+from core.exceptions import MySqlError
+from logs.decorators import log_step
+from logs.logging import get_logger
+
+log = get_logger(__name__)
+
+_DDL_STATEMENTS = [
+    # 1. exam_papers
+    """
+    CREATE TABLE IF NOT EXISTS exam_papers (
+        id          VARCHAR(64)  PRIMARY KEY,
+        title       VARCHAR(200) NOT NULL,
+        grade       VARCHAR(20),
+        subject     VARCHAR(20)  DEFAULT '数学',
+        total_score INT,
+        duration_minutes INT,
+        exam_type   VARCHAR(20),
+        paper_year  INT,
+        created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
+        updated_at  DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    # 2. questions
+    """
+    CREATE TABLE IF NOT EXISTS questions (
+        id                  VARCHAR(64)  PRIMARY KEY,
+        exam_paper_id       VARCHAR(64)  NOT NULL,
+        number              VARCHAR(20)  NOT NULL,
+        content             TEXT         NOT NULL,
+        answer              TEXT,
+        score               INT,
+        question_type       VARCHAR(20)  NOT NULL,
+        difficulty          TINYINT,
+        knowledge_point_ids JSON,
+        img_url             JSON,
+        answer_img          JSON,
+        sort_order          INT,
+        created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (exam_paper_id) REFERENCES exam_papers(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    # 3. knowledge_points
+    """
+    CREATE TABLE IF NOT EXISTS knowledge_points (
+        id        INT          AUTO_INCREMENT PRIMARY KEY,
+        name      VARCHAR(100) NOT NULL,
+        level     TINYINT      NOT NULL,
+        parent_id INT          NULL,
+        sort_order INT         DEFAULT 0,
+        FOREIGN KEY (parent_id) REFERENCES knowledge_points(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    # 4. formulas_theorems
+    """
+    CREATE TABLE IF NOT EXISTS formulas_theorems (
+        id                  INT          AUTO_INCREMENT PRIMARY KEY,
+        name                VARCHAR(200) NOT NULL,
+        content             TEXT         NOT NULL,
+        description         TEXT,
+        knowledge_point_id  INT          NOT NULL,
+        created_at          DATETIME     DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (knowledge_point_id) REFERENCES knowledge_points(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    # 5. students
+    """
+    CREATE TABLE IF NOT EXISTS students (
+        id         INT          AUTO_INCREMENT PRIMARY KEY,
+        name       VARCHAR(50)  NOT NULL,
+        grade      VARCHAR(20),
+        class_name VARCHAR(30),
+        school_name VARCHAR(100),
+        student_no VARCHAR(30),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_school_no (school_name, student_no)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    # 6. answer_sheets
+    """
+    CREATE TABLE IF NOT EXISTS answer_sheets (
+        id              INT          AUTO_INCREMENT PRIMARY KEY,
+        student_id      INT          NOT NULL,
+        exam_paper_id   VARCHAR(64)  NOT NULL,
+        question_id     VARCHAR(64)  NOT NULL,
+        student_answer  TEXT,
+        score_obtained  DECIMAL(5,1),
+        is_correct      TINYINT,
+        answer_img      JSON,
+        marked_at       DATETIME,
+        created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (student_id)    REFERENCES students(id),
+        FOREIGN KEY (exam_paper_id) REFERENCES exam_papers(id),
+        FOREIGN KEY (question_id)   REFERENCES questions(id),
+        UNIQUE KEY uk_student_q (student_id, question_id, exam_paper_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+]
+
+
+@log_step
+class MySqlRepository:
+    """Async data-access layer over MySQL (via SQLAlchemy 2.0 async)."""
+
+    def __init__(self, settings: Settings):
+        if not settings.mysql_url:
+            raise MySqlError("mysql_url 未配置")
+        self._engine: AsyncEngine = create_async_engine(
+            settings.mysql_url,
+            pool_size=5,
+            max_overflow=10,
+            pool_pre_ping=True,
+            echo=settings.debug,
+        )
+        self._url = settings.mysql_url
+
+    async def init_tables(self) -> None:
+        """幂等建表 — 应用启动时调用，确保 6 张表存在。"""
+        async with self._engine.begin() as conn:
+            for ddl in _DDL_STATEMENTS:
+                await conn.execute(text(ddl))
+        log.info("MySQL 表结构初始化完成（6 张表）")
+
+    async def close(self) -> None:
+        """关闭连接池，应用关闭时调用。"""
+        await self._engine.dispose()
+        log.info("MySQL 连接池已关闭")
+
+    async def _execute(self, sql: str, params: dict | None = None) -> list[dict]:
+        """底层执行：执行 SQL 并返回 dict 列表。"""
+        async with self._engine.connect() as conn:
+            result = await conn.execute(text(sql), params or {})
+            rows = result.fetchall()
+            if not rows:
+                return []
+            columns = list(result.keys())
+            return [dict(zip(columns, row)) for row in rows]
+
+    async def insert_one(self, table: str, data: dict) -> int:
+        """插入单行，返回 lastrowid（适用于自增主键表）。"""
+        columns = ", ".join(data.keys())
+        placeholders = ", ".join(f":{k}" for k in data)
+        sql = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"
+        async with self._engine.begin() as conn:
+            result = await conn.execute(text(sql), data)
+            return result.lastrowid
+
+    async def upsert(
+        self, table: str, data: dict, unique_columns: list[str]
+    ) -> int:
+        """INSERT ... ON DUPLICATE KEY UPDATE，返回受影响行数。"""
+        columns = ", ".join(data.keys())
+        placeholders = ", ".join(f":{k}" for k in data)
+        updates = ", ".join(f"{k}=VALUES({k})" for k in data if k not in unique_columns)
+        sql = (
+            f"INSERT INTO {table} ({columns}) VALUES ({placeholders}) "
+            f"ON DUPLICATE KEY UPDATE {updates}"
+        )
+        async with self._engine.begin() as conn:
+            result = await conn.execute(text(sql), data)
+            return result.rowcount
+
+    async def find_one(self, table: str, where: dict) -> dict | None:
+        """按条件查询单行。"""
+        clauses = " AND ".join(f"{k}=:{k}" for k in where)
+        sql = f"SELECT * FROM {table} WHERE {clauses} LIMIT 1"
+        rows = await self._execute(sql, where)
+        return rows[0] if rows else None
+
+    async def find_all(
+        self, table: str, where: dict | None = None, limit: int = 100
+    ) -> list[dict]:
+        """按条件查询多行。"""
+        if where:
+            clauses = " AND ".join(f"{k}=:{k}" for k in where)
+            sql = f"SELECT * FROM {table} WHERE {clauses} LIMIT {limit}"
+            return await self._execute(sql, where)
+        sql = f"SELECT * FROM {table} LIMIT {limit}"
+        return await self._execute(sql)
