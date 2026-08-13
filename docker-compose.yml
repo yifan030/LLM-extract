@@ -134,8 +134,10 @@ services:
   api:
     image: exam-extract:1.0
     container_name: exam-extract
-    <<: *default-network
     restart: unless-stopped
+    networks:
+      - app-network
+      - llm-shared
     ports:
       - "8000:8085"
     environment:
@@ -204,6 +206,8 @@ networks:
   app-network:
     driver: bridge
     name: app-network
+  llm-shared:
+    external: true
 
 volumes:
   llm-construct-question_minio_data:
