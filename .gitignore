@@ -17,6 +17,9 @@ __pycache__/
 .env
 .env.*
 
+# Docker 配置（含密钥，敏感信息请通过 .env 注入）
+docker-compose*.yml
+
 # 项目文档与参考资料
 docs/
 reference/
