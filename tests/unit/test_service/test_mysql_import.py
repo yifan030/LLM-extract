@@ -374,3 +374,24 @@ class TestMySqlImportService:
         with pytest.raises(AppError) as exc_info:
             svc.get_batch_status("nonexistent_job")
         assert exc_info.value.status_code == 404
+
+    async def test_start_batch_import_truncation_warns(self, mock_deps, caplog):
+        """列桶达到上限时：响应标记 truncated=True 并记录 warning。"""
+        minio_repo, mysql_repo, llm_svc, prompt_svc = mock_deps
+        mysql_import._batch_jobs.clear()
+        minio_repo.list_md_files.return_value = [
+            MinioFileItem(object_key=f"papers/{i}.md", size=1, last_modified="")
+            for i in range(3)
+        ]
+        mysql_repo._execute.return_value = []
+        svc = MySqlImportService(minio_repo, mysql_repo, llm_svc, prompt_svc)
+        svc.import_paper = AsyncMock(return_value=PaperImportResponse(
+            paper_id="paper_x", title="", question_count=0,
+        ))
+
+        with patch.object(mysql_import, "_LIST_MD_LIMIT", 3), \
+                caplog.at_level("WARNING"):
+            resp = await svc.start_batch_import()
+
+        assert resp.truncated is True
+        assert any("达到列桶上限" in r.message for r in caplog.records)

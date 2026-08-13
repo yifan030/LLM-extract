@@ -35,6 +35,8 @@ log = get_logger(__name__)
 # 进程内批量导入 job 注册表（重启即失，一次性操作可重跑）
 _batch_jobs: dict[str, dict] = {}
 
+_LIST_MD_LIMIT = 100000  # list_md_files 列桶上限（达到即可能截断）
+
 
 @log_step
 class MySqlImportService:
@@ -430,7 +432,10 @@ class MySqlImportService:
 
     async def start_batch_import(self) -> BatchImportResponse:
         """一键批量增量导入：列出桶内全部 .md，跳过已入库，后台逐个 import_paper。"""
-        md_files = await self._minio.list_md_files(prefix="", limit=100000)
+        md_files = await self._minio.list_md_files(prefix="", limit=_LIST_MD_LIMIT)
+        truncated = len(md_files) >= _LIST_MD_LIMIT
+        if truncated:
+            log.warning("桶内 .md 文件数达到列桶上限 %d，可能存在未列出的文件", _LIST_MD_LIMIT)
         existing_rows = await self._mysql._execute("SELECT id FROM exam_papers")
         existing_ids = {row["id"] for row in existing_rows}
 
@@ -457,6 +462,7 @@ class MySqlImportService:
         )
         return BatchImportResponse(
             job_id=job_id, total=len(md_files), skipped=skipped,
+            truncated=truncated,
         )
 
     async def _run_batch(self, job_id: str, object_keys: list[str]) -> None:

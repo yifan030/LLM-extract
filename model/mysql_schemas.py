@@ -76,6 +76,7 @@ class BatchImportResponse(BaseModel):
     total: int
     skipped: int
     status: str = "running"
+    truncated: bool = False  # 桶内 .md 文件数达到列桶上限，可能存在未列出的文件
 
 
 class BatchFileResult(BaseModel):
