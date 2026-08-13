@@ -72,9 +72,9 @@ async def recommend_weak_kp(
     req: RecommendRequest,
     svc: MySqlImportService = Depends(get_mysql_import_service),
 ):
-    """查找薄弱知识点（正确率 < threshold）并推荐同类题。"""
+    """查找薄弱知识点（得分率 < threshold）并推荐同类题。"""
     return await svc.get_weak_kp_recommend(
-        req.student_id, req.exam_paper_id, req.accuracy_threshold
+        req.student_id, req.exam_paper_id, req.score_rate_threshold
     )
 
 

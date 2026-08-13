@@ -45,15 +45,15 @@ class CsvExportRequest(BaseModel):
 class WeakKnowledgePoint(BaseModel):
     kp_id: int
     kp_name: str
-    total: int
-    correct: int
-    accuracy: float
+    total_score: float
+    full_score: float
+    score_rate: float
 
 
 class RecommendRequest(BaseModel):
     student_id: int
     exam_paper_id: str
-    accuracy_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+    score_rate_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
 
 
 class RecommendQuestion(BaseModel):

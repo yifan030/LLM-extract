@@ -262,11 +262,12 @@ class TestMySqlImportService:
             os.remove(zip_path)
 
     async def test_get_weak_kp_recommend(self, mock_deps):
-        """薄弱知识点推荐：按正确率阈值筛选知识点并推荐同类题。"""
+        """薄弱知识点推荐：按得分率阈值筛选知识点并推荐同类题。"""
         minio_repo, mysql_repo, llm_svc, prompt_svc = mock_deps
         mysql_repo._execute.side_effect = [
-            [  # 薄弱知识点（accuracy < 0.6）
-                {"id": 1, "name": "交集", "total": 4, "correct": 2, "accuracy": 0.5},
+            [  # 薄弱知识点（score_rate < 0.6）
+                {"id": 1, "name": "交集", "total_score": 4.0,
+                 "full_score": 8.0, "score_rate": 0.5},
             ],
             [  # 推荐题目
                 {"id": "q_rec1", "number": "1", "content": "x" * 300,
@@ -282,9 +283,9 @@ class TestMySqlImportService:
         kp = result.weak_knowledge_points[0]
         assert kp.kp_id == 1
         assert kp.kp_name == "交集"
-        assert kp.total == 4
-        assert kp.correct == 2
-        assert kp.accuracy == 0.5
+        assert kp.total_score == 4.0
+        assert kp.full_score == 8.0
+        assert kp.score_rate == 0.5
 
         assert len(result.recommended_questions) == 1
         rec = result.recommended_questions[0]

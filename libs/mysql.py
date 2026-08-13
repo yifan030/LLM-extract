@@ -101,6 +101,62 @@ _DDL_STATEMENTS = [
         UNIQUE KEY uk_student_q (student_id, question_id, exam_paper_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
+    # 7. question_knowledge_point — 题目-知识点 多对多关联表
+    """
+    CREATE TABLE IF NOT EXISTS question_knowledge_point (
+        id                  INT          AUTO_INCREMENT PRIMARY KEY,
+        question_id         VARCHAR(64)  NOT NULL,
+        knowledge_point_id  INT          NOT NULL,
+        created_at          DATETIME     DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (question_id)        REFERENCES questions(id),
+        FOREIGN KEY (knowledge_point_id) REFERENCES knowledge_points(id),
+        UNIQUE KEY uk_question_kp (question_id, knowledge_point_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    # 8. student_kp_scores — 学生-知识点得分表（三键聚合）
+    """
+    CREATE TABLE IF NOT EXISTS student_kp_scores (
+        id                  INT          AUTO_INCREMENT PRIMARY KEY,
+        student_id          INT          NOT NULL,
+        knowledge_point_id  INT          NOT NULL,
+        exam_paper_id       VARCHAR(64)  NOT NULL,
+        total_score         DECIMAL(8,2) NOT NULL DEFAULT 0,
+        full_score          DECIMAL(8,2) NOT NULL DEFAULT 0,
+        score_rate          DECIMAL(5,4),
+        question_count      INT          NOT NULL DEFAULT 0,
+        updated_at          DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (student_id)          REFERENCES students(id),
+        FOREIGN KEY (knowledge_point_id)  REFERENCES knowledge_points(id),
+        FOREIGN KEY (exam_paper_id)       REFERENCES exam_papers(id),
+        UNIQUE KEY uk_student_kp_paper (student_id, knowledge_point_id, exam_paper_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    # 9. videos — 视频主表
+    """
+    CREATE TABLE IF NOT EXISTS videos (
+        id               INT          AUTO_INCREMENT PRIMARY KEY,
+        title            VARCHAR(200) NOT NULL,
+        url              VARCHAR(500),
+        duration_seconds INT,
+        subject          VARCHAR(20)  DEFAULT '数学',
+        grade            VARCHAR(20),
+        description      TEXT,
+        created_at       DATETIME     DEFAULT CURRENT_TIMESTAMP,
+        updated_at       DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    # 10. video_knowledge_point — 视频-知识点 多对多关联表
+    """
+    CREATE TABLE IF NOT EXISTS video_knowledge_point (
+        id                  INT          AUTO_INCREMENT PRIMARY KEY,
+        video_id            INT          NOT NULL,
+        knowledge_point_id  INT          NOT NULL,
+        created_at          DATETIME     DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (video_id)           REFERENCES videos(id),
+        FOREIGN KEY (knowledge_point_id) REFERENCES knowledge_points(id),
+        UNIQUE KEY uk_video_kp (video_id, knowledge_point_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
 ]
 
 
@@ -125,7 +181,7 @@ class MySqlRepository:
         async with self._engine.begin() as conn:
             for ddl in _DDL_STATEMENTS:
                 await conn.execute(text(ddl))
-        log.info("MySQL 表结构初始化完成（6 张表）")
+        log.info("MySQL 表结构初始化完成（10 张表）")
 
     async def close(self) -> None:
         """关闭连接池，应用关闭时调用。"""

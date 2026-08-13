@@ -33,6 +33,8 @@ class TestMySqlRepositoryDDL:
         expected = {
             "exam_papers", "questions", "knowledge_points",
             "formulas_theorems", "students", "answer_sheets",
+            "question_knowledge_point", "student_kp_scores",
+            "videos", "video_knowledge_point",
         }
         rows = await mysql_repo._execute("SHOW TABLES")
         actual = {list(r.values())[0] for r in rows}

@@ -18,10 +18,14 @@ TEST_MYSQL_URL = "mysql+aiomysql://root:root@127.0.0.1:3306/llm_construct"
 # answer_sheets → formulas_theorems → knowledge_points → questions → exam_papers → students
 _CLEANUP_TABLES = [
     "answer_sheets",
+    "student_kp_scores",
+    "question_knowledge_point",
+    "video_knowledge_point",
     "formulas_theorems",
     "knowledge_points",
     "questions",
     "exam_papers",
+    "videos",
     "students",
 ]
 

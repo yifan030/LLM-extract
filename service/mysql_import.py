@@ -94,6 +94,7 @@ class MySqlImportService:
 
         # 4. 逐题写入 questions
         questions_written = 0
+        kp_id_map = await self._load_kp_name_map()
         for idx, q in enumerate(extracted.questions):
             question_id = gen_question_id(object_key, q.number)
             # 注意：Question 模型字段为 candidate_knowledge_points（四级知识点名称列表），
@@ -115,6 +116,21 @@ class MySqlImportService:
             }
             await self._mysql.upsert("questions", q_data, ["id"])
             questions_written += 1
+
+            # 写题目-知识点关联表（名称 → id，解析失败跳过并记日志）
+            for kp_name in (q.candidate_knowledge_points or []):
+                kp_id = kp_id_map.get(kp_name.strip())
+                if kp_id is None:
+                    log.warning(
+                        "知识点名称未匹配，跳过关联: paper=%s question=%s kp=%s",
+                        paper_id, q.number, kp_name,
+                    )
+                    continue
+                await self._mysql.upsert(
+                    "question_knowledge_point",
+                    {"question_id": question_id, "knowledge_point_id": kp_id},
+                    ["question_id", "knowledge_point_id"],
+                )
 
         log.info(
             "MySQL 试卷导入完成: paper_id=%s, questions=%d",
@@ -262,6 +278,7 @@ class MySqlImportService:
         # 7. 写入 answer_sheets
         scored_count = 0
         total_obtained = 0.0
+        q_score_map: dict[str, float] = {}  # question_id -> 学生得分
         for q in questions:
             answer_text = student_answers.get(q["number"])
             score_str = None
@@ -270,6 +287,9 @@ class MySqlImportService:
                 score_match = re.search(r"(\d+)\s*分", answer_text)
                 if score_match:
                     score_str = score_match.group(1)
+
+            score_obtained = float(score_str) if score_str else 0.0
+            q_score_map[q["id"]] = score_obtained
 
             sheet_data = {
                 "student_id": student_id,
@@ -288,6 +308,11 @@ class MySqlImportService:
             if score_str:
                 scored_count += 1
                 total_obtained += float(score_str)
+
+        # 8. 聚合学生-知识点得分（通过 question_knowledge_point 关联），写入 student_kp_scores
+        await self._upsert_student_kp_scores(
+            student_id, paper_id, questions, q_score_map
+        )
 
         log.info(
             "MySQL 答题卡导入完成: student_id=%d, scored=%d",
@@ -348,56 +373,50 @@ class MySqlImportService:
         self,
         student_id: int,
         exam_paper_id: str,
-        accuracy_threshold: float = 0.6,
+        score_rate_threshold: float = 0.6,
     ) -> RecommendResponse:
-        """薄弱知识点推荐：找到正确率 < threshold 的知识点并推荐同类题。
+        """薄弱知识点推荐：按得分率 < threshold 筛知识点并推荐同类题。
 
-        注意：questions.knowledge_point_ids 存的是 LLM 抽取的知识点名称字符串
-        （如 ["交集", "并集"]），因此与 knowledge_points 表按 name 关联。
+        数据来源为 student_kp_scores（导入答题卡时预聚合的学生-知识点得分），
+        推荐同类题走 question_knowledge_point 关联表，不再依赖名称字符串 JOIN。
         """
-        # 查询薄弱知识点
-        # JSON_TABLE 按名称展开 knowledge_point_ids，与 knowledge_points.name 关联
+        # 查询薄弱知识点（得分率低于阈值）
         weak_sql = """
-        SELECT kp.id, kp.name,
-               COUNT(*) AS total,
-               SUM(a.is_correct) AS correct,
-               ROUND(SUM(a.is_correct) / COUNT(*), 2) AS accuracy
-        FROM answer_sheets a
-        JOIN questions q ON a.question_id = q.id
-        JOIN JSON_TABLE(q.knowledge_point_ids, '$[*]'
-             COLUMNS (kp_name VARCHAR(100) PATH '$')) jt
-        JOIN knowledge_points kp ON kp.name = jt.kp_name
-        WHERE a.student_id = :student_id
-          AND a.exam_paper_id = :exam_paper_id
-          AND a.is_correct IS NOT NULL
-        GROUP BY kp.id, kp.name
-        HAVING accuracy < :threshold
+        SELECT s.knowledge_point_id AS id, kp.name,
+               s.total_score, s.full_score, s.score_rate
+        FROM student_kp_scores s
+        JOIN knowledge_points kp ON kp.id = s.knowledge_point_id
+        WHERE s.student_id = :student_id
+          AND s.exam_paper_id = :exam_paper_id
+          AND s.full_score > 0
+          AND s.score_rate < :threshold
         """
         weak_rows = await self._mysql._execute(weak_sql, {
             "student_id": student_id,
             "exam_paper_id": exam_paper_id,
-            "threshold": accuracy_threshold,
+            "threshold": score_rate_threshold,
         })
 
         weak_kps = [
             WeakKnowledgePoint(
                 kp_id=r["id"],
                 kp_name=r["name"],
-                total=r["total"],
-                correct=r["correct"],
-                accuracy=r["accuracy"],
+                total_score=float(r["total_score"]),
+                full_score=float(r["full_score"]),
+                score_rate=float(r["score_rate"]),
             )
             for r in weak_rows
         ]
 
-        # 为每个薄弱知识点推荐同类题（按知识点名称匹配）
+        # 为每个薄弱知识点推荐同类题（通过关联表按知识点 id 匹配）
         all_recommended: list[RecommendQuestion] = []
         seen_ids: set[str] = set()
         for kp in weak_kps:
             rec_sql = """
             SELECT q.id, q.number, q.content, q.question_type, q.difficulty
             FROM questions q
-            WHERE JSON_CONTAINS(q.knowledge_point_ids, :kp_name_json)
+            JOIN question_knowledge_point qkp ON qkp.question_id = q.id
+            WHERE qkp.knowledge_point_id = :kp_id
               AND q.id NOT IN (
                   SELECT question_id FROM answer_sheets WHERE student_id = :student_id
               )
@@ -405,7 +424,7 @@ class MySqlImportService:
             LIMIT 5
             """
             rec_rows = await self._mysql._execute(rec_sql, {
-                "kp_name_json": json.dumps(kp.kp_name),
+                "kp_id": kp.kp_id,
                 "student_id": student_id,
             })
             for r in rec_rows:
@@ -429,6 +448,69 @@ class MySqlImportService:
             weak_knowledge_points=weak_kps,
             recommended_questions=all_recommended,
         )
+
+    async def _load_kp_name_map(self) -> dict[str, int]:
+        """加载 knowledge_points 表 name → id 映射（同名多级时优先 level==4）。"""
+        rows = await self._mysql._execute("SELECT id, name, level FROM knowledge_points")
+        kp_map: dict[str, int] = {}
+        for r in rows:
+            name = (r.get("name") or "").strip()
+            if not name:
+                continue
+            level = r.get("level")
+            if name in kp_map and level != 4:
+                continue
+            kp_map[name] = r["id"]
+        return kp_map
+
+    async def _upsert_student_kp_scores(
+        self,
+        student_id: int,
+        paper_id: str,
+        questions: list[dict],
+        q_score_map: dict[str, float],
+    ) -> None:
+        """按知识点聚合学生得分（得分率），写入 student_kp_scores（三键）。
+
+        一道题挂多个知识点时，该题的得分与满分同时计入每个知识点（不做分摊）。
+        """
+        q_full_map = {
+            q["id"]: float(q["score"]) if q.get("score") is not None else 0.0
+            for q in questions
+        }
+        rows = await self._mysql._execute(
+            """
+            SELECT qkp.question_id, qkp.knowledge_point_id
+            FROM question_knowledge_point qkp
+            JOIN questions q ON q.id = qkp.question_id
+            WHERE q.exam_paper_id = :paper_id
+            """,
+            {"paper_id": paper_id},
+        )
+        agg: dict[int, dict[str, float]] = {}
+        for r in rows:
+            kpid = r["knowledge_point_id"]
+            bucket = agg.setdefault(kpid, {"total": 0.0, "full": 0.0, "count": 0})
+            bucket["total"] += q_score_map.get(r["question_id"], 0.0)
+            bucket["full"] += q_full_map.get(r["question_id"], 0.0)
+            bucket["count"] += 1
+
+        for kpid, b in agg.items():
+            if b["full"] <= 0:
+                continue
+            await self._mysql.upsert(
+                "student_kp_scores",
+                {
+                    "student_id": student_id,
+                    "knowledge_point_id": kpid,
+                    "exam_paper_id": paper_id,
+                    "total_score": b["total"],
+                    "full_score": b["full"],
+                    "score_rate": round(b["total"] / b["full"], 4),
+                    "question_count": int(b["count"]),
+                },
+                ["student_id", "knowledge_point_id", "exam_paper_id"],
+            )
 
     async def start_batch_import(self) -> BatchImportResponse:
         """一键批量增量导入：列出桶内全部 .md，跳过已入库，后台逐个 import_paper。"""
