@@ -69,3 +69,28 @@ class RecommendResponse(BaseModel):
     exam_paper_id: str
     weak_knowledge_points: list[WeakKnowledgePoint] = Field(default_factory=list)
     recommended_questions: list[RecommendQuestion] = Field(default_factory=list)
+
+
+class BatchImportResponse(BaseModel):
+    job_id: str
+    total: int
+    skipped: int
+    status: str = "running"
+
+
+class BatchFileResult(BaseModel):
+    object_key: str
+    paper_id: str
+    status: str  # "succeeded" | "failed"
+    error: str | None = None
+
+
+class BatchImportStatusResponse(BaseModel):
+    job_id: str
+    status: str  # "running" | "completed"
+    total: int
+    succeeded: int
+    failed: int
+    skipped: int
+    finished: bool
+    results: list[BatchFileResult] = Field(default_factory=list)

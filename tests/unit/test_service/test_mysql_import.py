@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.exceptions import PaperNotFound
+from core.exceptions import AppError, PaperNotFound
 from libs.id_gen import gen_paper_id
 from model.mysql_schemas import (
     AnswerImportResponse,
@@ -18,6 +18,8 @@ from model.mysql_schemas import (
     PaperImportResponse,
     RecommendResponse,
 )
+from model.schemas import MinioFileItem
+from service import mysql_import  # 模块级 _batch_jobs 注册表
 from service.mysql_import import MySqlImportService
 
 
@@ -294,3 +296,81 @@ class TestMySqlImportService:
         assert mysql_repo._execute.call_count == 2
         assert mysql_repo._execute.call_args_list[0].args[1]["threshold"] == 0.6
         assert mysql_repo._execute.call_args_list[0].args[1]["student_id"] == 5
+
+    async def test_start_batch_import_skips_existing(self, mock_deps):
+        """批量增量导入：已入库的 paper_id 被跳过，仅导入未入库文件。"""
+        minio_repo, mysql_repo, llm_svc, prompt_svc = mock_deps
+        mysql_import._batch_jobs.clear()
+        minio_repo.list_md_files.return_value = [
+            MinioFileItem(object_key="papers/a.md", size=1, last_modified=""),
+            MinioFileItem(object_key="papers/b.md", size=1, last_modified=""),
+            MinioFileItem(object_key="papers/c.md", size=1, last_modified=""),
+        ]
+        # exam_papers 已存在 a、b
+        mysql_repo._execute.return_value = [
+            {"id": gen_paper_id("papers/a.md")},
+            {"id": gen_paper_id("papers/b.md")},
+        ]
+        svc = MySqlImportService(minio_repo, mysql_repo, llm_svc, prompt_svc)
+        svc.import_paper = AsyncMock(return_value=PaperImportResponse(
+            paper_id=gen_paper_id("papers/c.md"), title="", question_count=0,
+        ))
+
+        resp = await svc.start_batch_import()
+        await mysql_import._batch_jobs[resp.job_id]["task"]
+
+        assert resp.total == 3
+        assert resp.skipped == 2
+        assert resp.status == "running"
+
+        status = svc.get_batch_status(resp.job_id)
+        assert status.total == 3
+        assert status.skipped == 2
+        assert status.succeeded == 1
+        assert status.failed == 0
+        assert status.finished is True
+        assert status.status == "completed"
+        assert len(status.results) == 1
+        assert status.results[0].object_key == "papers/c.md"
+        assert status.results[0].status == "succeeded"
+
+        # 只有 c 被导入
+        svc.import_paper.assert_called_once_with("papers/c.md")
+
+    async def test_start_batch_import_single_failure_continues(self, mock_deps):
+        """单个文件失败不中断整批，继续导入后续文件。"""
+        minio_repo, mysql_repo, llm_svc, prompt_svc = mock_deps
+        mysql_import._batch_jobs.clear()
+        minio_repo.list_md_files.return_value = [
+            MinioFileItem(object_key="papers/a.md", size=1, last_modified=""),
+            MinioFileItem(object_key="papers/b.md", size=1, last_modified=""),
+        ]
+        mysql_repo._execute.return_value = []  # 都未入库
+        svc = MySqlImportService(minio_repo, mysql_repo, llm_svc, prompt_svc)
+        svc.import_paper = AsyncMock(side_effect=[
+            Exception("LLM 抽取失败"),
+            PaperImportResponse(
+                paper_id=gen_paper_id("papers/b.md"), title="", question_count=1,
+            ),
+        ])
+
+        resp = await svc.start_batch_import()
+        await mysql_import._batch_jobs[resp.job_id]["task"]
+
+        status = svc.get_batch_status(resp.job_id)
+        assert status.succeeded == 1
+        assert status.failed == 1
+        assert status.finished is True
+        assert status.results[0].status == "failed"
+        assert "LLM 抽取失败" in status.results[0].error
+        assert status.results[1].status == "succeeded"
+        assert svc.import_paper.call_count == 2
+
+    async def test_get_batch_status_not_found(self, mock_deps):
+        """轮询不存在的 job_id 抛 AppError(404)。"""
+        minio_repo, mysql_repo, llm_svc, prompt_svc = mock_deps
+        svc = MySqlImportService(minio_repo, mysql_repo, llm_svc, prompt_svc)
+
+        with pytest.raises(AppError) as exc_info:
+            svc.get_batch_status("nonexistent_job")
+        assert exc_info.value.status_code == 404

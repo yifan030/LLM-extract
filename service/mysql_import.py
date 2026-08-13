@@ -1,20 +1,26 @@
 # -*- coding: utf-8 -*-
 """MySQL 导入编排服务 — 独立于 HugeGraph/Milvus 流水线。"""
+import asyncio
 import csv
 import io
 import json
 import os
 import re
 import tempfile
+import uuid
 import zipfile
 
+from core.exceptions import AppError
 from model.mysql_schemas import (
-    PaperImportResponse,
     AnswerImportResponse,
     AnswerSheetImportResponse,
-    WeakKnowledgePoint,
+    BatchFileResult,
+    BatchImportResponse,
+    BatchImportStatusResponse,
+    PaperImportResponse,
     RecommendQuestion,
     RecommendResponse,
+    WeakKnowledgePoint,
 )
 from libs.id_gen import gen_paper_id, gen_question_id
 from libs.minio import MinioRepository
@@ -25,6 +31,9 @@ from logs.decorators import log_step
 from logs.logging import get_logger
 
 log = get_logger(__name__)
+
+# 进程内批量导入 job 注册表（重启即失，一次性操作可重跑）
+_batch_jobs: dict[str, dict] = {}
 
 
 @log_step
@@ -417,4 +426,84 @@ class MySqlImportService:
             exam_paper_id=exam_paper_id,
             weak_knowledge_points=weak_kps,
             recommended_questions=all_recommended,
+        )
+
+    async def start_batch_import(self) -> BatchImportResponse:
+        """一键批量增量导入：列出桶内全部 .md，跳过已入库，后台逐个 import_paper。"""
+        md_files = await self._minio.list_md_files(prefix="", limit=100000)
+        existing_rows = await self._mysql._execute("SELECT id FROM exam_papers")
+        existing_ids = {row["id"] for row in existing_rows}
+
+        to_import = [
+            f.object_key for f in md_files
+            if gen_paper_id(f.object_key) not in existing_ids
+        ]
+        skipped = len(md_files) - len(to_import)
+        job_id = uuid.uuid4().hex
+
+        _batch_jobs[job_id] = {
+            "task": asyncio.create_task(self._run_batch(job_id, to_import)),
+            "status": "running",
+            "total": len(md_files),
+            "succeeded": 0,
+            "failed": 0,
+            "skipped": skipped,
+            "finished": False,
+            "results": [],
+        }
+        log.info(
+            "批量增量导入已启动: job_id=%s, total=%d, skipped=%d, to_import=%d",
+            job_id, len(md_files), skipped, len(to_import),
+        )
+        return BatchImportResponse(
+            job_id=job_id, total=len(md_files), skipped=skipped,
+        )
+
+    async def _run_batch(self, job_id: str, object_keys: list[str]) -> None:
+        """后台顺序导入；单个文件失败记录后继续，不中断整批。"""
+        job = _batch_jobs[job_id]
+        for key in object_keys:
+            try:
+                result = await self.import_paper(key)
+                job["succeeded"] += 1
+                job["results"].append({
+                    "object_key": key,
+                    "paper_id": result.paper_id,
+                    "status": "succeeded",
+                    "error": None,
+                })
+            except Exception as exc:
+                job["failed"] += 1
+                job["results"].append({
+                    "object_key": key,
+                    "paper_id": gen_paper_id(key),
+                    "status": "failed",
+                    "error": str(exc),
+                })
+                log.warning("批量导入单文件失败: %s, err=%s", key, exc)
+        job["status"] = "completed"
+        job["finished"] = True
+        log.info(
+            "批量增量导入完成: job_id=%s, succeeded=%d, failed=%d",
+            job_id, job["succeeded"], job["failed"],
+        )
+
+    def get_batch_status(self, job_id: str) -> BatchImportStatusResponse:
+        """查询批量导入进度；job 不存在抛 AppError(404)。"""
+        job = _batch_jobs.get(job_id)
+        if job is None:
+            raise AppError(
+                f"批量导入任务不存在: {job_id}",
+                status_code=404,
+                detail={"job_id": job_id},
+            )
+        return BatchImportStatusResponse(
+            job_id=job_id,
+            status=job["status"],
+            total=job["total"],
+            succeeded=job["succeeded"],
+            failed=job["failed"],
+            skipped=job["skipped"],
+            finished=job["finished"],
+            results=[BatchFileResult(**r) for r in job["results"]],
         )
