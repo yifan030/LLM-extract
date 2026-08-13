@@ -13,6 +13,8 @@ from model.mysql_schemas import (
     CsvExportRequest,
     RecommendRequest,
     RecommendResponse,
+    BatchImportResponse,
+    BatchImportStatusResponse,
 )
 from service.api.deps import get_mysql_import_service
 from service.mysql_import import MySqlImportService
@@ -74,3 +76,24 @@ async def recommend_weak_kp(
     return await svc.get_weak_kp_recommend(
         req.student_id, req.exam_paper_id, req.accuracy_threshold
     )
+
+
+@router.post("/import/batch", response_model=BatchImportResponse, tags=["mysql"])
+async def import_batch(
+    svc: MySqlImportService = Depends(get_mysql_import_service),
+):
+    """一键批量增量导入：列出 MinIO 桶内全部 .md，跳过已入库，后台导入。"""
+    return await svc.start_batch_import()
+
+
+@router.get(
+    "/import/batch/{job_id}",
+    response_model=BatchImportStatusResponse,
+    tags=["mysql"],
+)
+async def import_batch_status(
+    job_id: str,
+    svc: MySqlImportService = Depends(get_mysql_import_service),
+):
+    """轮询批量导入进度。"""
+    return svc.get_batch_status(job_id)
