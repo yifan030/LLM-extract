@@ -71,6 +71,7 @@ class LlmService:
                 ],
                 temperature=self._config.temperature,
                 max_tokens=max_tokens,
+                response_format={"type": "json_object"},
             )
         except Exception as exc:
             raise LlmApiCallError(f"LLM API 调用失败: {exc}") from exc

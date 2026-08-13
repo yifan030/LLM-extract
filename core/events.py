@@ -69,7 +69,7 @@ async def start_consumer(redis_url: str, extraction_svc):
         except asyncio.CancelledError:
             log.info("消费者被取消，正在停止...")
             break
-        except (TimeoutError, ConnectionError, OSError) as exc:
+        except (TimeoutError, redis.TimeoutError, ConnectionError, OSError) as exc:
             # Redis 阻塞读取超时 / 连接抖动，正常现象，静默重试
             await asyncio.sleep(1)
         except Exception as exc:

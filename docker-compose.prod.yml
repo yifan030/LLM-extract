@@ -1,12 +1,11 @@
 # ============================================================
-<<<<<<< HEAD
 # Exam Extract API — Docker Compose 生产环境
 #
 # 用法:
 #   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 #   docker compose -f docker-compose.prod.yml logs -f
 #   docker compose -f docker-compose.prod.yml down
-#
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod build
 # 注意:
 #   - 服务器已运行 Milvus/Redis/MinIO 等中间件，本文件仅部署 API 服务
 #   - 使用 host 网络模式以访问宿主机 127.0.0.1 上的中间件
@@ -18,24 +17,13 @@
 services:
   exam-extract:
     image: exam-extract:1.1
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # 在 Mac ARM 上构建需交叉编译为 linux/amd64 时取消注释:
+      # platform: linux/amd64
     container_name: exam-extract
     restart: always
-=======
-# Exam Extract API — Docker Compose 部署
-#
-# 用法:
-#   docker compose up -d              # 启动
-#   docker compose logs -f            # 查看日志
-#   docker compose down               # 停止
-#   docker compose build --no-cache   # 重新构建
-# ============================================================
-services:
-  api:
-    build: .
-    image: exam-extract:1.1
-    container_name: exam-extract
-    restart: unless-stopped
->>>>>>> a2e0100 (update(env):单独配置服务器变量)
     network_mode: host
     environment:
       # ── LLM ──
@@ -46,64 +34,37 @@ services:
       - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.0}
       - LLM_TIMEOUT=${LLM_TIMEOUT:-120.0}
 
-<<<<<<< HEAD
       # ── MinIO (服务器已运行，宿主机 127.0.0.1:8999) ──
-      - MINIO_ENDPOINT=127.0.0.1:8999
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-127.0.0.1:8999}
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
       - MINIO_BUCKET=${MINIO_BUCKET:-llm-construct}
       - MINIO_SECURE=${MINIO_SECURE:-false}
 
       # ── Redis (服务器已运行，宿主机 127.0.0.1:8369) ──
-      - REDIS_URL=redis://:Baidu12345@127.0.0.1:8369/10
+      - REDIS_URL=${REDIS_URL}
 
       # ── HugeGraph (外部服务) ──
       - HG_HOST=${HG_HOST:-202.107.249.39}
-=======
-      # ── MinIO ──
-      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
-      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
-      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
-      - MINIO_BUCKET=${MINIO_BUCKET:-llm-construct}
-      - MINIO_SECURE=${MINIO_SECURE:-false}
-
-      # ── Redis ──
-      - REDIS_URL=${REDIS_URL}
-
-      # ── HugeGraph ──
-      - HG_HOST=${HG_HOST}
->>>>>>> a2e0100 (update(env):单独配置服务器变量)
       - HG_PORT=${HG_PORT:-50045}
       - HG_USER=${HG_USER:-admin}
       - HG_PASSWD=${HG_PASSWD:-admin}
       - HG_GRAPHSPACE=${HG_GRAPHSPACE:-DEFAULT}
       - HG_GRAPH=${HG_GRAPH:-edu}
 
-<<<<<<< HEAD
       # ── OCR 服务 (外部) ──
       - OCR_SERVICE_URL=${OCR_SERVICE_URL:-http://202.107.249.39:50108/api/v1/construct-question/ocr-parse}
 
       # ── Milvus (服务器已运行，宿主机端口 8530->19530) ──
-      - MILVUS_URI=http://127.0.0.1:8530
-      - MILVUS_DB=llm_extract
-      - MILVUS_QUESTION_COLLECTION=${MILVUS_QUESTION_COLLECTION:-question_embed_v1}
-      - MILVUS_KP_COLLECTION=${MILVUS_KP_COLLECTION:-kp_embed_v1}
-
-      # ── MySQL (服务器已运行，宿主机 127.0.0.1:3306) ──
-      - MYSQL_URL=mysql+aiomysql://root:root@127.0.0.1:3306/llm_construct
-
-      # ── Embedding ──
-=======
-
-      #—— MILVUS ——
-      - MILVUS_URI=http://127.0.0.1:8530
+      - MILVUS_URI=${MILVUS_URI:-http://127.0.0.1:8530}
       - MILVUS_DB=${MILVUS_DB:-llm_extract}
       - MILVUS_QUESTION_COLLECTION=${MILVUS_QUESTION_COLLECTION:-question_embed_v1}
       - MILVUS_KP_COLLECTION=${MILVUS_KP_COLLECTION:-kp_embed_v1}
 
+      # ── MySQL (服务器已运行，宿主机 127.0.0.1:8306) ──
+      - MYSQL_URL=${MYSQL_URL}
 
-            # ── Embedding ──
->>>>>>> a2e0100 (update(env):单独配置服务器变量)
+      # ── Embedding ──
       - EMBED_BASE_URL=${EMBED_BASE_URL:-}
       - EMBED_ENDPOINT=${EMBED_ENDPOINT:-/api/bgem3/encoder}
       - EMBED_LOAD_SERVICE=${EMBED_LOAD_SERVICE:-llm_search}
@@ -112,7 +73,6 @@ services:
       - EMBED_KP_MATCH_THRESHOLD=${EMBED_KP_MATCH_THRESHOLD:-0.75}
       - EMBED_KP_TOP_K=${EMBED_KP_TOP_K:-5}
 
-<<<<<<< HEAD
       # ── App ──
       - DEBUG=${DEBUG:-false}
       - OUTPUT_DIR=${OUTPUT_DIR:-tmp/extractions}
@@ -127,15 +87,4 @@ services:
 
 volumes:
   app-tmp:
-=======
-      # ── OCR 服务 ──
-      - OCR_SERVICE_URL=${OCR_SERVICE_URL:-http://localhost:8090/api/v1/construct-question/ocr-parse}
 
-      # ── App ──
-      - DEBUG=${DEBUG:-false}
-      - OUTPUT_DIR=${OUTPUT_DIR:-tmp/extractions}
-    volumes:
-      # 持久化临时输出（可选）
-      - ./tmp:/app/tmp
-
->>>>>>> a2e0100 (update(env):单独配置服务器变量)
