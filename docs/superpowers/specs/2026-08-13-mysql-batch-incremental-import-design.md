@@ -50,7 +50,7 @@ POST /api/v1/mysql/import/paper  { "object_key": "..." }
 **流程**：
 
 ```
-list_md_files(limit=大)                 # llm-construct 桶全部 .md
+list_md_files(limit=100000)            # llm-construct 桶全部 .md（足够大的上限列全桶）
   → SELECT id FROM exam_papers         # 一次拿到已入库 paper_id 集合
   → 过滤掉 gen_paper_id(object_key) 已存在的文件
   → asyncio.create_task(顺序逐个 import_paper)   # 复用现有单篇导入
@@ -120,14 +120,14 @@ class BatchImportStatusResponse(BaseModel):
 _batch_jobs: dict[str, dict] = {}
 
 class MySqlImportService:
-    def start_batch_import(self) -> BatchImportResponse:
+    async def start_batch_import(self) -> BatchImportResponse:
         """列出 .md → 过滤已入库 → 起后台任务 → 返回 job_id。"""
 
     def get_batch_status(self, job_id: str) -> BatchImportStatusResponse:
         """返回进程内 job 状态，不存在抛 AppError。"""
 ```
 
-- `start_batch_import` 是**同步**方法（`asyncio.create_task` 起后台协程），内部先做前置过滤（同步 await），再创建后台任务。
+- `start_batch_import` 是 `async def`（需 await `list_md_files` 与查已入库集合），前置过滤完成后用 `asyncio.create_task` 起后台协程，立即返回 `job_id`。
 - 后台协程 `_run_batch(job_id, to_import)` 顺序 `await self.import_paper(key)`，每个包 `try/except` 更新注册表。
 - job_id 用 `uuid.uuid4().hex`。
 
@@ -136,7 +136,7 @@ class MySqlImportService:
 ```python
 @router.post("/import/batch", response_model=BatchImportResponse, tags=["mysql"])
 async def import_batch(svc: MySqlImportService = Depends(get_mysql_import_service)):
-    return svc.start_batch_import()
+    return await svc.start_batch_import()
 
 @router.get("/import/batch/{job_id}", response_model=BatchImportStatusResponse, tags=["mysql"])
 async def import_batch_status(job_id: str, svc: MySqlImportService = Depends(get_mysql_import_service)):
