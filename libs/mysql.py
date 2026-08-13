@@ -210,14 +210,21 @@ class MySqlRepository:
     async def upsert(
         self, table: str, data: dict, unique_columns: list[str]
     ) -> int:
-        """INSERT ... ON DUPLICATE KEY UPDATE，返回受影响行数。"""
+        """INSERT ... ON DUPLICATE KEY UPDATE，返回受影响行数。
+
+        当 data 仅含唯一键（无可更新字段）时退化为 ``INSERT IGNORE``，
+        避免生成空的 ``ON DUPLICATE KEY UPDATE`` 子句导致 SQL 语法错误。
+        """
         columns = ", ".join(data.keys())
         placeholders = ", ".join(f":{k}" for k in data)
         updates = ", ".join(f"{k}=VALUES({k})" for k in data if k not in unique_columns)
-        sql = (
-            f"INSERT INTO {table} ({columns}) VALUES ({placeholders}) "
-            f"ON DUPLICATE KEY UPDATE {updates}"
-        )
+        if updates:
+            sql = (
+                f"INSERT INTO {table} ({columns}) VALUES ({placeholders}) "
+                f"ON DUPLICATE KEY UPDATE {updates}"
+            )
+        else:
+            sql = f"INSERT IGNORE INTO {table} ({columns}) VALUES ({placeholders})"
         async with self._engine.begin() as conn:
             result = await conn.execute(text(sql), data)
             return result.rowcount

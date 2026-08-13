@@ -37,6 +37,20 @@ _batch_jobs: dict[str, dict] = {}
 
 _LIST_MD_LIMIT = 100000  # list_md_files 列桶上限（达到即可能截断）
 
+# 纯答案卷判定：文件名含「答案」且不含「完整带答案卷」类标记 → 视为纯答案卷，批量导入时跳过。
+# 保留「周末测试卷含答案」「试卷+答案」「答案带题」等完整卷；「无答案」为无答案的完整试卷，也保留。
+_ANSWER_KEEP_MARKERS = (
+    "含答案", "及答案", "答案带题", "试卷+答案", "试题和答案", "学生版+答案", "无答案",
+)
+
+
+def _is_answer_only(object_key: str) -> bool:
+    """判断 MinIO 对象是否为纯答案卷（仅依据文件名启发式）。"""
+    name = object_key.rsplit("/", 1)[-1]
+    if any(m in name for m in _ANSWER_KEEP_MARKERS):
+        return False
+    return "答案" in name
+
 
 @log_step
 class MySqlImportService:
@@ -513,7 +527,7 @@ class MySqlImportService:
             )
 
     async def start_batch_import(self) -> BatchImportResponse:
-        """一键批量增量导入：列出桶内全部 .md，跳过已入库，后台逐个 import_paper。"""
+        """一键批量增量导入：列出桶内全部 .md，跳过纯答案卷与已入库，后台逐个 import_paper。"""
         md_files = await self._minio.list_md_files(prefix="", limit=_LIST_MD_LIMIT)
         truncated = len(md_files) >= _LIST_MD_LIMIT
         if truncated:
@@ -521,11 +535,15 @@ class MySqlImportService:
         existing_rows = await self._mysql._execute("SELECT id FROM exam_papers")
         existing_ids = {row["id"] for row in existing_rows}
 
+        answer_only = [f.object_key for f in md_files if _is_answer_only(f.object_key)]
         to_import = [
             f.object_key for f in md_files
-            if gen_paper_id(f.object_key) not in existing_ids
+            if not _is_answer_only(f.object_key)
+            and gen_paper_id(f.object_key) not in existing_ids
         ]
         skipped = len(md_files) - len(to_import)
+        if answer_only:
+            log.info("跳过纯答案卷 %d 份", len(answer_only))
         job_id = uuid.uuid4().hex
 
         _batch_jobs[job_id] = {
