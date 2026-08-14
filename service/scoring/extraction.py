@@ -56,6 +56,28 @@ def _extract_student_answers(markdown: str) -> dict[str, str]:
     return {}
 
 
+def _extract_student_scores(markdown: str) -> dict[str, float]:
+    """从 PaddleVL 答题卡 markdown 提取主观题得分 {题号: 得分}。
+
+    主观题区域形如 "14.(10分)"（题号+满分），区域内独立成行的 "8分" 为实际得分。
+    与 _extract_student_answers 互补：后者面向旧 OCR 的 "题号/答案" 表格，
+    本函数面向 8083 PaddleVL 的答题卡 markdown。
+    """
+    scores: dict[str, float] = {}
+    q_pat = re.compile(
+        r"(?:^|\n)\s*(\d{1,2})\s*[.．、]\s*[（(]\d+\s*分[）)]",
+        re.MULTILINE,
+    )
+    positions = [(m.group(1), m.start()) for m in q_pat.finditer(markdown)]
+    for i, (num, start) in enumerate(positions):
+        end = positions[i + 1][1] if i + 1 < len(positions) else len(markdown)
+        chunk = markdown[start:end]
+        sm = re.search(r"(?:^|\n)\s*(\d+(?:\.\d+)?)\s*分\s*(?:\n|$)", chunk)
+        if sm:
+            scores[num] = float(sm.group(1))
+    return scores
+
+
 def _parent_number(number: str) -> str:
     """提取大题号：'14(1)' → '14'，'14' → '14'。"""
     m = _SUB_Q_RE.match(number.strip())

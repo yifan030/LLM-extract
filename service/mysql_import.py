@@ -292,10 +292,11 @@ class MySqlImportService:
             raise PaperNotFound(paper_id)
 
         from service.scoring.meta import _extract_paper_meta
-        from service.scoring.extraction import _extract_student_answers
+        from service.scoring.extraction import _extract_student_answers, _extract_student_scores
 
-        student_name = _extract_paper_meta(ocr_text).get("student_name", "未知")
+        student_name = _extract_paper_meta(ocr_text).get("student_name") or "未知"
         student_answers = _extract_student_answers(ocr_text)
+        student_scores = _extract_student_scores(ocr_text)
 
         student_no = source_key or paper_id
         student_data = {
@@ -325,6 +326,9 @@ class MySqlImportService:
                 score_match = re.search(r"(\d+)\s*分", answer_text)
                 if score_match:
                     score_str = score_match.group(1)
+            # 兜底：旧 OCR 无 "题号/答案" 表时，从 PaddleVL markdown 提取主观题得分
+            if score_str is None and q["number"] in student_scores:
+                score_str = str(student_scores[q["number"]])
 
             q_score_map[q["id"]] = float(score_str) if score_str else 0.0
 

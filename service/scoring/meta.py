@@ -12,9 +12,33 @@ from service.scoring.constants import (
 from service.scoring.extraction import _extract_image_urls
 
 
+def _extract_student_name(markdown: str) -> str:
+    """从答题卡 markdown 提取学生姓名。
+
+    PaddleVL 输出为学生信息表（"姓名" 单元格后接名字），
+    另有 "1座位26高81班吴卓龙" 这类文本兜底。
+    """
+    m = re.search(r"姓名\s*(?:</?t[dh][^>]*>\s*)*([^<>\s]{2,6})", markdown)
+    if m:
+        return m.group(1).strip()
+    m = re.search(r"姓名\s*[:：]?\s*([一-龥]{2,4})", markdown)
+    if m:
+        return m.group(1)
+    m = re.search(r"\d+班\s*([一-龥]{2,4})", markdown)
+    if m:
+        return m.group(1)
+    return ""
+
+
 def _extract_paper_meta(markdown: str) -> dict:
     """从 markdown 提取试卷元信息。"""
-    meta: dict = {"title": "", "subject": "", "duration": None, "total_score": None}
+    meta: dict = {
+        "title": "",
+        "subject": "",
+        "duration": None,
+        "total_score": None,
+        "student_name": "",
+    }
 
     # 标题: 第一个 # 标题行
     title_m = re.search(r"^#\s+(.+)", markdown, re.MULTILINE)
@@ -35,6 +59,9 @@ def _extract_paper_meta(markdown: str) -> dict:
     score_m = _TOTAL_SCORE_RE.search(markdown[:500])
     if score_m:
         meta["total_score"] = int(score_m.group(1))
+
+    # 学生姓名（答题卡场景；普通试卷无此字段，返回空串）
+    meta["student_name"] = _extract_student_name(markdown)
 
     return meta
 

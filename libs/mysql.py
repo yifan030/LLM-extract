@@ -77,7 +77,7 @@ _DDL_STATEMENTS = [
         grade      VARCHAR(20),
         class_name VARCHAR(30),
         school_name VARCHAR(100),
-        student_no VARCHAR(30),
+        student_no VARCHAR(255),
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uk_school_no (school_name, student_no)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
