@@ -225,6 +225,32 @@ class TestMySqlImportService:
         with pytest.raises(PaperNotFound):
             await svc.import_answer_sheet("sheets/s1.jpg", "paper_nonexistent")
 
+    async def test_import_answer_sheet_from_text(self, mock_deps):
+        """答题卡：给定 OCR 文本，直接写 students/answer_sheets/kp_scores。"""
+        minio_repo, mysql_repo, llm_svc, prompt_svc = mock_deps
+
+        async def fake_find_one(table, where):
+            if table == "exam_papers":
+                return {"id": "paper_test", "title": "测试", "grade": "高一"}
+            if table == "students":
+                return {"id": 5, "name": "张三"}
+            return None
+
+        mysql_repo.find_one.side_effect = fake_find_one
+        mysql_repo.find_all.return_value = [
+            {"id": "q_001", "number": "1", "content": "test", "score": 10}
+        ]
+        svc = MySqlImportService(minio_repo, mysql_repo, llm_svc, prompt_svc)
+
+        ocr_text = "学生姓名：张三\n第1题 答案A 5分"
+        result = await svc.import_answer_sheet_from_text(ocr_text, "paper_test")
+
+        assert isinstance(result, AnswerSheetImportResponse)
+        assert result.paper_id == "paper_test"
+        assert result.student_id == 5
+        # 不触发图片读取 / OCR 调用
+        minio_repo.get_object_text.assert_not_called()
+
     async def test_export_csv(self, mock_deps):
         """CSV 导出：按表查询并打包为 ZIP。"""
         minio_repo, mysql_repo, llm_svc, prompt_svc = mock_deps

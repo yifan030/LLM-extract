@@ -217,29 +217,20 @@ class MySqlImportService:
     async def import_answer_sheet(
         self, object_key: str, paper_id: str
     ) -> AnswerSheetImportResponse:
-        """从 MinIO 读取答题卡图片，OCR 识别后写入 students + answer_sheets。
+        """从 MinIO 读取答题卡图片，OCR 识别后委托 import_answer_sheet_from_text。"""
+        log.info("MySQL 答题卡导入开始: object_key=%s, paper_id=%s", object_key, paper_id)
 
-        流程：MinIO 取图片 → OCR → 提取学生信息 → UPSERT students → 写 answer_sheets
-        """
-        log.info(
-            "MySQL 答题卡导入开始: object_key=%s, paper_id=%s",
-            object_key, paper_id,
-        )
-
-        # 1. 验证试卷存在
+        # 1. 验证试卷存在（先于读图/OCR，fail-fast）
         paper = await self._mysql.find_one("exam_papers", {"id": paper_id})
         if not paper:
             from core.exceptions import PaperNotFound
             raise PaperNotFound(paper_id)
 
         # 2. 从 MinIO 获取答题卡图片（二进制）
-        #    注意 MinioRepository.get_object_text 返回文本，图片需 get_object 返回 bytes
         try:
-            response = await self._minio._client.get_object(
-                self._minio.bucket, object_key
-            )
+            response = await self._minio._client.get_object(self._minio.bucket, object_key)
             image_bytes = await response.read()
-            response.release()  # aiohttp 的 release() 是同步方法（见 libs/minio.py 同款用法）
+            response.release()
         except Exception as exc:
             from core.exceptions import MinioObjectNotFound
             raise MinioObjectNotFound(object_key) from exc
@@ -248,7 +239,6 @@ class MySqlImportService:
         import httpx
         from conf.config import Settings
         settings = Settings()
-        ocr_result_text = ""
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 files = {"file": (os.path.basename(object_key), image_bytes, "image/jpeg")}
@@ -260,50 +250,55 @@ class MySqlImportService:
             from core.exceptions import OcrServiceError
             raise OcrServiceError(f"OCR 识别失败: {exc}") from exc
 
-        # 4. 从 OCR 结果中提取学生信息和各题得分
-        #    复用 scoring 模块的模块级解析函数（ScoringService 依赖 HugeGraph，这里不使用）
+        return await self.import_answer_sheet_from_text(ocr_result_text, paper_id, source_key=object_key)
+
+    async def import_answer_sheet_from_text(
+        self, ocr_text: str, paper_id: str, source_key: str | None = None
+    ) -> AnswerSheetImportResponse:
+        """给定 OCR 文本，提取学生信息与各题得分，写入 students + answer_sheets + student_kp_scores。"""
+        log.info("MySQL 答题卡文本入库开始: paper_id=%s", paper_id)
+
+        paper = await self._mysql.find_one("exam_papers", {"id": paper_id})
+        if not paper:
+            from core.exceptions import PaperNotFound
+            raise PaperNotFound(paper_id)
+
         from service.scoring.meta import _extract_paper_meta
         from service.scoring.extraction import _extract_student_answers
 
-        student_name = _extract_paper_meta(ocr_result_text).get("student_name", "未知")
-        student_answers = _extract_student_answers(ocr_result_text)
+        student_name = _extract_paper_meta(ocr_text).get("student_name", "未知")
+        student_answers = _extract_student_answers(ocr_text)
 
-        # 5. UPSERT students（school_name + student_no 唯一约束）
+        student_no = source_key or paper_id
         student_data = {
             "name": student_name,
             "grade": paper.get("grade"),
-            "school_name": "未知学校",  # OCR 可能提取，先设默认
-            "student_no": object_key,   # 临时用 object_key 做学号
+            "school_name": "未知学校",
+            "student_no": student_no,
         }
         await self._mysql.upsert("students", student_data, ["school_name", "student_no"])
 
-        # 查询刚才 upsert 的 student_id
         student_row = await self._mysql.find_one(
-            "students",
-            {"school_name": "未知学校", "student_no": object_key},
+            "students", {"school_name": "未知学校", "student_no": student_no}
         )
         student_id = student_row["id"] if student_row else 0
 
-        # 6. 查询试卷的所有题目
         questions = await self._mysql.find_all(
             "questions", {"exam_paper_id": paper_id}, limit=100
         )
 
-        # 7. 写入 answer_sheets
         scored_count = 0
         total_obtained = 0.0
-        q_score_map: dict[str, float] = {}  # question_id -> 学生得分
+        q_score_map: dict[str, float] = {}
         for q in questions:
             answer_text = student_answers.get(q["number"])
             score_str = None
-            # 如果答案中包含分数标注（如 "5分"），尝试提取
             if answer_text:
                 score_match = re.search(r"(\d+)\s*分", answer_text)
                 if score_match:
                     score_str = score_match.group(1)
 
-            score_obtained = float(score_str) if score_str else 0.0
-            q_score_map[q["id"]] = score_obtained
+            q_score_map[q["id"]] = float(score_str) if score_str else 0.0
 
             sheet_data = {
                 "student_id": student_id,
@@ -311,8 +306,8 @@ class MySqlImportService:
                 "question_id": q["id"],
                 "student_answer": answer_text,
                 "score_obtained": float(score_str) if score_str else None,
-                "is_correct": None,  # 未分析
-                "answer_img": json.dumps([object_key]),
+                "is_correct": None,
+                "answer_img": json.dumps([source_key]) if source_key else None,
                 "marked_at": None,
             }
             await self._mysql.upsert(
@@ -323,14 +318,10 @@ class MySqlImportService:
                 scored_count += 1
                 total_obtained += float(score_str)
 
-        # 8. 聚合学生-知识点得分（通过 question_knowledge_point 关联），写入 student_kp_scores
-        await self._upsert_student_kp_scores(
-            student_id, paper_id, questions, q_score_map
-        )
+        await self._upsert_student_kp_scores(student_id, paper_id, questions, q_score_map)
 
         log.info(
-            "MySQL 答题卡导入完成: student_id=%d, scored=%d",
-            student_id, scored_count,
+            "MySQL 答题卡文本入库完成: student_id=%d, scored=%d", student_id, scored_count
         )
         return AnswerSheetImportResponse(
             student_id=student_id,
