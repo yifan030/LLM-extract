@@ -31,6 +31,23 @@ async def publish_event(redis_url: str, object_key: str) -> str | None:
         return None
 
 
+async def _reclaim_pending(r, stream_key: str, group: str, consumer_name: str) -> list:
+    """回收 idle 超过 30s 的 pending 消息（失败不 ack 后的重试机制）。
+
+    返回 [(msg_id, fields_dict), ...]；服务器不支持 XAUTOCLAIM 时返回空列表（静默降级）。
+    """
+    try:
+        result = await r.xautoclaim(
+            stream_key, group, consumer_name,
+            min_idle_time=30_000, start_id="0-0", count=10,
+        )
+    except (redis.ResponseError, AttributeError):
+        return []
+    if not result:
+        return []
+    return result[0]
+
+
 # ── 消费者 ──────────────────────────────────────────────────
 
 
@@ -63,6 +80,19 @@ async def _run_consumer(redis_url: str, group: str, consumer_name: str, stream_k
                         log.info("消费完成: %s", object_key)
                     except Exception as exc:
                         log.error("处理失败: %s, err=%s", object_key, exc)
+            # 回收 pending 消息（重试机制）：失败未 ack 的消息 idle 超时后重新投递
+            for msg_id, fields in await _reclaim_pending(r, stream_key, group, consumer_name):
+                object_key = fields.get(b"object_key", b"").decode()
+                if not object_key:
+                    continue
+                set_correlation_id()
+                log.info("回收重试消息: %s → %s", msg_id, object_key)
+                try:
+                    await handler(object_key)
+                    await r.xack(stream_key, group, msg_id)
+                    log.info("重试消费完成: %s", object_key)
+                except Exception as exc:
+                    log.error("重试处理失败: %s, err=%s", object_key, exc)
         except asyncio.CancelledError:
             log.info("消费者被取消，正在停止...")
             break

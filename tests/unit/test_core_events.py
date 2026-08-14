@@ -2,6 +2,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import redis
 
 import core.events as events
 
@@ -25,3 +26,19 @@ async def test_start_mysql_consumer_delegates():
         "redis://x", events.MYSQL_CONSUMER_GROUP, events.MYSQL_CONSUMER_NAME,
         events.STREAM_KEY, svc.handle_event,
     )
+
+
+@pytest.mark.asyncio
+async def test_reclaim_pending_returns_messages():
+    r = AsyncMock()
+    r.xautoclaim.return_value = [[[b"1-1", {b"object_key": b"papers/x.md"}]], b"1-1"]
+    result = await events._reclaim_pending(r, "s", "g", "c")
+    assert result == [[b"1-1", {b"object_key": b"papers/x.md"}]]
+
+
+@pytest.mark.asyncio
+async def test_reclaim_pending_unsupported():
+    r = AsyncMock()
+    r.xautoclaim.side_effect = redis.ResponseError("ERR")
+    result = await events._reclaim_pending(r, "s", "g", "c")
+    assert result == []
