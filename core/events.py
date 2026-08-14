@@ -12,6 +12,8 @@ log = get_logger(__name__)
 STREAM_KEY = "extract:events"
 CONSUMER_GROUP = "exam-extract"
 CONSUMER_NAME = "worker-1"
+MYSQL_CONSUMER_GROUP = "mysql-import"
+MYSQL_CONSUMER_NAME = "mysql-worker-1"
 
 # ── 生产者 ──────────────────────────────────────────────────
 
@@ -32,45 +34,39 @@ async def publish_event(redis_url: str, object_key: str) -> str | None:
 # ── 消费者 ──────────────────────────────────────────────────
 
 
-async def start_consumer(redis_url: str, extraction_svc):
-    """后台消费 Redis Stream 中的 MinIO 事件。"""
+async def _run_consumer(redis_url: str, group: str, consumer_name: str, stream_key: str, handler) -> None:
+    """通用消费者循环：逐个调用 handler(object_key)；失败不 ack，交 pending 重试。"""
     r = redis.from_url(redis_url, socket_keepalive=True, health_check_interval=30)
 
     try:
-        await r.xgroup_create(STREAM_KEY, CONSUMER_GROUP, id="0", mkstream=True)
+        await r.xgroup_create(stream_key, group, id="0", mkstream=True)
     except redis.ResponseError:
         pass
 
-    log.info("Redis Stream 消费者已启动: %s/%s", STREAM_KEY, CONSUMER_GROUP)
+    log.info("Redis Stream 消费者已启动: %s/%s", stream_key, group)
 
     while True:
         try:
             messages = await r.xreadgroup(
-                CONSUMER_GROUP,
-                CONSUMER_NAME,
-                streams={STREAM_KEY: ">"},
-                count=1,
-                block=5000,
+                group, consumer_name, streams={stream_key: ">"}, count=1, block=5000
             )
-            for stream, entries in messages:
+            for _, entries in messages:
                 for msg_id, fields in entries:
                     object_key = fields.get(b"object_key", b"").decode()
                     if not object_key:
                         continue
-                    set_correlation_id()  # 每条消息生成新的 cid
+                    set_correlation_id()
                     log.info("消费事件: %s → %s", msg_id, object_key)
                     try:
-                        await extraction_svc.run(object_key)
-                        await r.xack(STREAM_KEY, CONSUMER_GROUP, msg_id)
+                        await handler(object_key)
+                        await r.xack(stream_key, group, msg_id)
                         log.info("消费完成: %s", object_key)
                     except Exception as exc:
-                        log.error("抽取失败: %s, err=%s", object_key, exc)
-                        # 不 ack，消息会保留在 pending 列表用于重试
+                        log.error("处理失败: %s, err=%s", object_key, exc)
         except asyncio.CancelledError:
             log.info("消费者被取消，正在停止...")
             break
         except (TimeoutError, redis.TimeoutError, ConnectionError, OSError) as exc:
-            # Redis 阻塞读取超时 / 连接抖动，正常现象，静默重试
             await asyncio.sleep(1)
         except Exception as exc:
             log.error("消费者循环异常: %s", exc)
@@ -78,3 +74,16 @@ async def start_consumer(redis_url: str, extraction_svc):
 
     await r.close()
     log.info("消费者连接已关闭")
+
+
+async def start_consumer(redis_url: str, extraction_svc) -> None:
+    """后台消费 Redis Stream 中的 MinIO 事件（HugeGraph/Milvus 抽取）。"""
+    await _run_consumer(redis_url, CONSUMER_GROUP, CONSUMER_NAME, STREAM_KEY, extraction_svc.run)
+
+
+async def start_mysql_consumer(redis_url: str, mysql_import_svc) -> None:
+    """后台消费 Redis Stream 中的 MinIO 事件（MySQL 自动入库，独立 group）。"""
+    await _run_consumer(
+        redis_url, MYSQL_CONSUMER_GROUP, MYSQL_CONSUMER_NAME, STREAM_KEY,
+        mysql_import_svc.handle_event,
+    )
