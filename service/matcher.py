@@ -41,6 +41,7 @@ class MatcherService:
         llm_result: LlmExtractResult,
         source_file: str,
         level4_names: list[str],
+        content_hash: str | None = None,
     ) -> IntermediateJson:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         now_iso = datetime.now().isoformat()
@@ -48,7 +49,7 @@ class MatcherService:
         level4_map = {name.strip(): f"level_4_{name.strip()}" for name in level4_names}
 
         # deterministic paper ID from source path → 幂等导入
-        paper_hash = hashlib.md5(source_file.encode()).hexdigest()
+        paper_hash = content_hash or hashlib.md5(source_file.encode()).hexdigest()
         paper_int_id = int(paper_hash[:15], 16)  # 60-bit → fits Java Long
         paper_vertex_id = f"paper_{paper_hash}"
 
@@ -119,6 +120,7 @@ class MatcherService:
         milvus_repo,         # MilvusRepository
         threshold: float = 0.75,
         top_k: int = 5,
+        content_hash: str | None = None,
     ) -> IntermediateJson:
         """Like :meth:`match`, but unmatched candidates fall back to fuzzy matching.
 
@@ -142,7 +144,7 @@ class MatcherService:
         level4_map = {name.strip(): f"level_4_{name.strip()}" for name in level4_names}
 
         # deterministic paper ID from source path → 幂等导入
-        paper_hash = hashlib.md5(source_file.encode()).hexdigest()
+        paper_hash = content_hash or hashlib.md5(source_file.encode()).hexdigest()
         paper_int_id = int(paper_hash[:15], 16)  # 60-bit → fits Java Long
         paper_vertex_id = f"paper_{paper_hash}"
 

@@ -84,6 +84,7 @@ async def lifespan(app: FastAPI):
             minio_repo, hg_repo, llm_svc, prompt_svc, matcher_svc, settings,
             embed_svc=embed_svc,
             milvus_repo=milvus_repo,
+            mysql_repo=mysql_repo,
         )
         _consumer_task = asyncio.create_task(
             start_consumer(settings.redis_url, extraction_svc)

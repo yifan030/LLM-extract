@@ -11,6 +11,7 @@ from libs.minio import MinioRepository
 from service.llm import LlmService
 from service.matcher import MatcherService
 from service.prompt import PromptService, load_level4_names
+from service.mysql_events import extract_file_id
 
 log = get_logger(__name__)
 
@@ -35,6 +36,7 @@ class ExtractionService:
         settings: Settings | None = None,
         embed_svc=None,
         milvus_repo=None,
+        mysql_repo=None,
     ):
         self._minio = minio_repo
         self._hg = hg_repo
@@ -44,6 +46,8 @@ class ExtractionService:
         # Milvus 双写依赖的两个可选服务；缺省 None 以保持向后兼容
         self._embed_svc = embed_svc
         self._milvus = milvus_repo
+        # MySQL 仓库：反解 construct content_hash 用（内容派生 paper_id）；缺省 None 走路径派生
+        self._mysql = mysql_repo
         self._settings = settings
         self._output_dir = settings.output_dir if settings else "tmp/extractions"
 
@@ -62,6 +66,8 @@ class ExtractionService:
         prompt = self._prompt.build_prompt_sync(markdown, level4_names)
         # 4. LLM 抽取
         extracted = await self._llm.extract(prompt)
+        # 4.5 反解原始文件 content_hash（内容派生 paper_id，与 MySQL 管线一致；拿不到则退回路径派生）
+        content_hash = await self._resolve_content_hash(object_key)
         # 5. 知识点匹配 (stateless matcher: level4_names passed as arg)
         #    当 embed_svc + milvus_repo 可用时，启用模糊匹配（Milvus 向量检索兜底），
         #    否则退化为纯字符串精确匹配。
@@ -76,10 +82,12 @@ class ExtractionService:
                 milvus_repo=self._milvus,
                 threshold=threshold,
                 top_k=top_k,
+                content_hash=content_hash,
             )
         else:
             intermediate = self._matcher.match(
-                extracted, source_file=object_key, level4_names=level4_names
+                extracted, source_file=object_key, level4_names=level4_names,
+                content_hash=content_hash,
             )
 
         # 提取 paper_id 用于目录命名
@@ -128,6 +136,26 @@ class ExtractionService:
         report["artifact_dir"] = artifact_dir
         log.info("抽取完成: paper_id=%s", paper_id)
         return report
+
+    async def _resolve_content_hash(self, object_key: str) -> str | None:
+        """反解原始文件 content_hash（内容派生 paper_id，与 MySQL 管线一致）。
+
+        优先查 construct 侧 ``edu_construct_files.content_hash``；查不到（无 construct
+        记录、mysql_repo 未配置、老数据缺 content_hash）时返回 None，由 matcher 退回路径派生。
+        """
+        if self._mysql is None:
+            return None
+        file_id = extract_file_id(object_key)
+        if not file_id:
+            return None
+        try:
+            row = await self._mysql.find_one("edu_construct_files", {"file_id": file_id})
+        except Exception as exc:  # noqa: BLE001 - 图库管线不因查库失败而中断
+            log.warning("查询 construct content_hash 失败: %s", exc)
+            return None
+        if row and row.get("content_hash"):
+            return row["content_hash"]
+        return None
 
     async def _import_to_hg(self, data) -> dict:
         question_type_cache = await self._hg.preload_question_types()
