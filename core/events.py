@@ -45,7 +45,7 @@ async def _reclaim_pending(r, stream_key: str, group: str, consumer_name: str) -
         return []
     if not result:
         return []
-    return result[0]
+    return result[1]
 
 
 # ── 消费者 ──────────────────────────────────────────────────

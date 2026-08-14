@@ -31,7 +31,7 @@ async def test_start_mysql_consumer_delegates():
 @pytest.mark.asyncio
 async def test_reclaim_pending_returns_messages():
     r = AsyncMock()
-    r.xautoclaim.return_value = [[[b"1-1", {b"object_key": b"papers/x.md"}]], b"1-1"]
+    r.xautoclaim.return_value = [b"0-0", [[b"1-1", {b"object_key": b"papers/x.md"}]]]
     result = await events._reclaim_pending(r, "s", "g", "c")
     assert result == [[b"1-1", {b"object_key": b"papers/x.md"}]]
 
