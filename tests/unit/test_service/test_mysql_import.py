@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from core.exceptions import AppError, PaperNotFound
-from libs.id_gen import gen_content_hash, gen_paper_id
+from libs.id_gen import gen_paper_id, gen_paper_id_from_content_hash
 from model.mysql_schemas import (
     AnswerImportResponse,
     AnswerSheetImportResponse,
@@ -61,22 +61,32 @@ def mock_deps():
 @pytest.mark.asyncio
 class TestMySqlImportService:
     async def test_import_paper(self, mock_deps):
-        """试卷导入：LLM 抽取 + 写入 exam_papers + questions。"""
+        """试卷导入：反解 content_hash → LLM 抽取 + 写入 exam_papers + questions。"""
         minio_repo, mysql_repo, llm_svc, prompt_svc = mock_deps
-        mysql_repo.find_one.return_value = None  # 无内容重复
+
+        async def fake_find_one(table, where):
+            if table == "edu_construct_files":
+                return {"file_id": "f1", "content_hash": "abc123"}
+            if table == "exam_papers":
+                return None  # 无内容重复
+            return None
+
+        mysql_repo.find_one.side_effect = fake_find_one
         svc = MySqlImportService(minio_repo, mysql_repo, llm_svc, prompt_svc)
 
-        result = await svc.import_paper("papers/test.md")
+        result = await svc.import_paper("education/uploads/paper/f1/foo_parsed/foo.md")
 
         assert isinstance(result, PaperImportResponse)
         assert result.imported is True
         assert result.title == "测试试卷"
         assert result.question_count == 1
-        assert result.paper_id == gen_paper_id("papers/test.md")
+        assert result.paper_id == gen_paper_id_from_content_hash("abc123")
         assert result.paper_id.startswith("paper_")
 
         # MinIO 读取 + Prompt 构建 + LLM 抽取均被调用
-        minio_repo.get_object_text.assert_called_once_with("papers/test.md")
+        minio_repo.get_object_text.assert_called_once_with(
+            "education/uploads/paper/f1/foo_parsed/foo.md"
+        )
         prompt_svc.build_prompt_sync.assert_called_once_with("# 测试试卷\n...")
         llm_svc.extract.assert_called_once()
 
@@ -85,12 +95,13 @@ class TestMySqlImportService:
         assert upsert_tables.count("exam_papers") == 1
         assert upsert_tables.count("questions") == 1
 
-        # 校验写入的试卷数据（含内容指纹 content_hash）
+        # 校验写入的试卷数据（paper_id 与 content_hash 均由原始文件内容派生）
         p_args = next(
             c.args[1] for c in mysql_repo.upsert.call_args_list
             if c.args[0] == "exam_papers"
         )
-        assert p_args["content_hash"] == gen_content_hash("# 测试试卷\n...")
+        assert p_args["id"] == "paper_abc123"
+        assert p_args["content_hash"] == "abc123"
 
         # 校验写入的题目数据（知识点名称 JSON 序列化进 knowledge_point_ids 列）
         q_args = next(
@@ -105,16 +116,23 @@ class TestMySqlImportService:
         assert q_args["answer_img"] is None
 
     async def test_import_paper_dedup_hit_skips(self, mock_deps):
-        """内容重复（不同 object_key）→ 返回库里已有 paper_id，跳过 LLM 与写库。"""
+        """内容重复（同 content_hash 已存在）→ 返回已有 paper_id，跳过 LLM 与写库。"""
         minio_repo, mysql_repo, llm_svc, prompt_svc = mock_deps
-        # 库里已有一份相同内容的试卷，但 id 与当前 object_key 派生不同
-        mysql_repo.find_one.return_value = {"id": "paper_old", "title": "旧试卷"}
+
+        async def fake_find_one(table, where):
+            if table == "edu_construct_files":
+                return {"file_id": "f1", "content_hash": "abc123"}
+            if table == "exam_papers":
+                return {"id": "paper_old", "title": "旧试卷"}
+            return None
+
+        mysql_repo.find_one.side_effect = fake_find_one
         mysql_repo._execute.return_value = [{"c": 3}]
         svc = MySqlImportService(minio_repo, mysql_repo, llm_svc, prompt_svc)
 
-        result = await svc.import_paper("papers/new_key.md")
+        result = await svc.import_paper("education/uploads/paper/f1/foo_parsed/foo.md")
 
-        # 返回库里已有的 paper_id，而非 md5(new_key) 派生的新 id
+        # 返回库里已有的 paper_id，而非新派生的 id
         assert result.paper_id == "paper_old"
         assert result.imported is False
         assert result.title == "旧试卷"
@@ -124,10 +142,8 @@ class TestMySqlImportService:
         llm_svc.extract.assert_not_called()
         mysql_repo.upsert.assert_not_called()
         # 命中判定按内容 hash 查库（而非按 object_key）
-        mysql_repo.find_one.assert_called_once_with(
-            "exam_papers",
-            {"content_hash": gen_content_hash("# 测试试卷\n...")},
-        )
+        find_one_calls = [(c.args[0], c.args[1]) for c in mysql_repo.find_one.call_args_list]
+        assert ("exam_papers", {"content_hash": "abc123"}) in find_one_calls
 
     async def test_import_answers_paper_not_found(self, mock_deps):
         """答案导入：试卷不存在时抛 PaperNotFound。"""
@@ -357,45 +373,40 @@ class TestMySqlImportService:
         assert mysql_repo._execute.call_args_list[0].args[1]["threshold"] == 0.6
         assert mysql_repo._execute.call_args_list[0].args[1]["student_id"] == 5
 
-    async def test_start_batch_import_skips_existing(self, mock_deps):
-        """批量增量导入：已入库的 paper_id 被跳过，仅导入未入库文件。"""
+    async def test_start_batch_import_skips_answer_only(self, mock_deps):
+        """批量导入：跳过纯答案卷，其余全部导入（去重交由 import_paper 内部）。"""
         minio_repo, mysql_repo, llm_svc, prompt_svc = mock_deps
         mysql_import._batch_jobs.clear()
         minio_repo.list_md_files.return_value = [
-            MinioFileItem(object_key="papers/a.md", size=1, last_modified=""),
-            MinioFileItem(object_key="papers/b.md", size=1, last_modified=""),
-            MinioFileItem(object_key="papers/c.md", size=1, last_modified=""),
-        ]
-        # exam_papers 已存在 a、b
-        mysql_repo._execute.return_value = [
-            {"id": gen_paper_id("papers/a.md")},
-            {"id": gen_paper_id("papers/b.md")},
+            MinioFileItem(object_key="education/uploads/paper/a/foo_parsed/foo.md", size=1, last_modified=""),
+            MinioFileItem(object_key="education/uploads/paper/b/答案_parsed/答案.md", size=1, last_modified=""),
         ]
         svc = MySqlImportService(minio_repo, mysql_repo, llm_svc, prompt_svc)
         svc.import_paper = AsyncMock(return_value=PaperImportResponse(
-            paper_id=gen_paper_id("papers/c.md"), title="", question_count=0,
+            paper_id="paper_a", title="", question_count=0,
         ))
 
         resp = await svc.start_batch_import()
         await mysql_import._batch_jobs[resp.job_id]["task"]
 
-        assert resp.total == 3
-        assert resp.skipped == 2
+        assert resp.total == 2
+        assert resp.skipped == 1  # 只跳过纯答案卷
         assert resp.status == "running"
 
         status = svc.get_batch_status(resp.job_id)
-        assert status.total == 3
-        assert status.skipped == 2
+        assert status.total == 2
+        assert status.skipped == 1
         assert status.succeeded == 1
         assert status.failed == 0
         assert status.finished is True
         assert status.status == "completed"
         assert len(status.results) == 1
-        assert status.results[0].object_key == "papers/c.md"
         assert status.results[0].status == "succeeded"
 
-        # 只有 c 被导入
-        svc.import_paper.assert_called_once_with("papers/c.md")
+        # 只有非答案卷被导入
+        svc.import_paper.assert_called_once_with(
+            "education/uploads/paper/a/foo_parsed/foo.md"
+        )
 
     async def test_start_batch_import_single_failure_continues(self, mock_deps):
         """单个文件失败不中断整批，继续导入后续文件。"""

@@ -28,3 +28,21 @@ def gen_content_hash(markdown: str) -> str:
     """
     text = markdown.replace("\r\n", "\n").replace("\r", "\n").strip()
     return hashlib.md5(text.encode("utf-8")).hexdigest()
+
+
+def gen_content_hash_bytes(raw: bytes) -> str:
+    """从原始文件字节派生内容指纹（裸 32 位 hex，无前缀）。
+
+    用于 paper_id 与去重：与上传的原始文件（PDF/图片）字节一一对应，
+    可在上传阶段同步计算。区别于 :func:`gen_content_hash`（语义去重，需 OCR 后异步）。
+    """
+    return hashlib.md5(raw).hexdigest()
+
+
+def gen_paper_id_from_content_hash(content_hash: str) -> str:
+    """内容指纹 → 试卷 ID，格式 ``paper_{32 位 hex}``。
+
+    与 :func:`gen_paper_id`（路径派生，仅保留给迁移脚本计算旧 ID）不同，
+    本函数派生的是内容稳定、上传即可同步算出的 paper_id。
+    """
+    return f"paper_{content_hash}"

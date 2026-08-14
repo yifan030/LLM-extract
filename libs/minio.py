@@ -63,3 +63,27 @@ class MinioRepository:
                 ) from exc
             log.error("读取 MinIO 文件失败: %s, err=%s", object_key, exc)
             raise MinioObjectNotFound(object_key) from exc
+
+    async def get_object_bytes(self, object_key: str) -> bytes:
+        """读取对象原始字节；不存在时抛 MinioObjectNotFound。
+
+        用于从原始文件（PDF/图片）计算内容哈希（paper_id 派生与去重）。
+        """
+        try:
+            response = await self._client.get_object(self.bucket, object_key)
+            if response is None:
+                raise MinioObjectNotFound(object_key)
+            data = await response.read()
+            response.release()
+            return data
+        except MinioObjectNotFound:
+            raise
+        except Exception as exc:
+            err_str = str(exc).lower()
+            if "timeout" in err_str or "timed out" in err_str:
+                raise MinioTimeout(
+                    f"MinIO 连接超时: {object_key}",
+                    detail={"object_key": object_key},
+                ) from exc
+            log.error("读取 MinIO 文件失败: %s, err=%s", object_key, exc)
+            raise MinioObjectNotFound(object_key) from exc

@@ -7,7 +7,7 @@
 说明:
     - 复用 MySqlImportService.import_paper（单篇导入逻辑，不连 HugeGraph/Milvus）。
     - 纯答案卷判定：文件名含「答案」且不含「含答案/及答案/试卷+答案」等标记 → 跳过。
-    - 已入库判定：gen_paper_id(object_key) 已存在于 exam_papers。
+    - 已入库判定：import_paper 内部按 content_hash 去重，命中即返回 imported=False。
     - 单文件失败按 --retry 重试，仍失败则记录并继续，不中断整批。
     - 进度每 20 份 flush 一次结果到 --out（JSON），中断后可重跑（跳过已入库续跑）。
 """
@@ -18,7 +18,6 @@ import json
 from conf.config import Settings
 from libs.minio import MinioRepository
 from libs.mysql import MySqlRepository
-from libs.id_gen import gen_paper_id
 from service.llm import LlmService
 from service.prompt import PromptService
 from service.mysql_import import MySqlImportService
@@ -56,18 +55,15 @@ async def main() -> None:
     svc = MySqlImportService(minio_repo, mysql_repo, llm_svc, prompt_svc)
 
     md_files = await minio_repo.list_md_files(prefix="", limit=100000)
-    existing = {r["id"] for r in await mysql_repo._execute("SELECT id FROM exam_papers")}
 
+    # 已入库去重交由 import_paper 内部按 content_hash 判定（命中时零成本返回 imported=False）
     answer_only = [f.object_key for f in md_files if _is_answer_only(f.object_key)]
-    to_import = [
-        f.object_key for f in md_files
-        if not _is_answer_only(f.object_key) and gen_paper_id(f.object_key) not in existing
-    ]
+    to_import = [f.object_key for f in md_files if not _is_answer_only(f.object_key)]
     if args.limit:
         to_import = to_import[:args.limit]
 
     print(
-        f"待导入={len(to_import)} | 跳过纯答案卷={len(answer_only)} | 已入库={len(md_files) - len(to_import) - len(answer_only)} | 总 .md={len(md_files)}",
+        f"待导入={len(to_import)} | 跳过纯答案卷={len(answer_only)} | 总 .md={len(md_files)}",
         flush=True,
     )
 
@@ -90,7 +86,7 @@ async def main() -> None:
                     )
         results.append({
             "object_key": key,
-            "paper_id": resp.paper_id if resp else gen_paper_id(key),
+            "paper_id": resp.paper_id if resp else "",
             "title": resp.title if resp else "",
             "question_count": resp.question_count if resp else 0,
             "status": "OK" if ok else "FAIL",

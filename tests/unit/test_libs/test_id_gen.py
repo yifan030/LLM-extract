@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 """libs.id_gen 单元测试 — content hash 归一化与确定性。"""
-from libs.id_gen import gen_content_hash
+from libs.id_gen import (
+    gen_content_hash,
+    gen_content_hash_bytes,
+    gen_paper_id_from_content_hash,
+)
 
 
 class TestGenContentHash:
@@ -22,3 +26,23 @@ class TestGenContentHash:
         h = gen_content_hash("任意内容")
         assert len(h) == 32
         int(h, 16)  # 不抛异常即全为十六进制字符
+
+
+class TestGenContentHashBytes:
+    def test_returns_32_char_hex(self):
+        """原始字节 → 32 位十六进制（md5 裸 hex，无前缀）。"""
+        h = gen_content_hash_bytes(b"pdf-bytes")
+        assert len(h) == 32
+        int(h, 16)
+
+    def test_same_bytes_same_hash(self):
+        assert gen_content_hash_bytes(b"abc") == gen_content_hash_bytes(b"abc")
+
+    def test_different_bytes_differ(self):
+        assert gen_content_hash_bytes(b"abc") != gen_content_hash_bytes(b"abd")
+
+
+class TestGenPaperIdFromContentHash:
+    def test_prefixed_with_paper(self):
+        assert gen_paper_id_from_content_hash("a" * 32).startswith("paper_")
+        assert gen_paper_id_from_content_hash("a" * 32) == "paper_" + "a" * 32

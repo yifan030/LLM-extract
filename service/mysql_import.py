@@ -2,6 +2,7 @@
 """MySQL 导入编排服务 — 独立于 HugeGraph/Milvus 流水线。"""
 import asyncio
 import csv
+import hashlib
 import io
 import json
 import os
@@ -22,12 +23,12 @@ from model.mysql_schemas import (
     RecommendResponse,
     WeakKnowledgePoint,
 )
-from libs.id_gen import gen_content_hash, gen_paper_id, gen_question_id
+from libs.id_gen import gen_content_hash_bytes, gen_paper_id_from_content_hash, gen_question_id
 from libs.minio import MinioRepository
 from libs.mysql import MySqlRepository
 from service.llm import LlmService
 from service.prompt import PromptService
-from service.mysql_events import parse_event_key, resolve_paper_id
+from service.mysql_events import parse_event_key, resolve_paper_id, extract_file_id
 from logs.decorators import log_step
 from logs.logging import get_logger
 
@@ -90,7 +91,7 @@ class MySqlImportService:
         if category not in ("answer", "answer_sheet"):
             raise ValueError(f"未知 category: {category}")
 
-        paper_id = await resolve_paper_id(self._minio, paper_file_id)
+        paper_id = await resolve_paper_id(self._mysql, self._minio, paper_file_id)
 
         if category == "answer":
             result = await self.import_answers(object_key, paper_id)
@@ -106,16 +107,16 @@ class MySqlImportService:
     async def import_paper(self, object_key: str) -> PaperImportResponse:
         """从 MinIO 读取试卷 markdown，LLM 抽取后写入 exam_papers + questions。
 
-        流程：MinIO 取文件 → 内容 hash 查重（命中直接返回已有 paper_id）
-        → LLM 抽取 → 写 exam_papers + questions
+        流程：反解原始文件 content_hash（优先 construct 库）→ 派生幂等 paper_id
+        → 内容 hash 查重（命中直接返回已有 paper_id）→ LLM 抽取 → 写 exam_papers + questions
         """
         log.info("MySQL 试卷导入开始: object_key=%s", object_key)
 
-        # 1. 从 MinIO 读取
-        markdown = await self._minio.get_object_text(object_key)
+        # 1. 反解原始文件 content_hash，派生内容稳定的 paper_id（同一文件重传幂等）
+        content_hash = await self._resolve_content_hash(object_key)
+        paper_id = gen_paper_id_from_content_hash(content_hash)
 
-        # 2. 内容去重：归一化后的内容指纹命中库中已有试卷，直接返回，不再抽取/写库
-        content_hash = gen_content_hash(markdown)
+        # 2. 内容去重：同 content_hash 已存在 → 直接返回，不再抽取/写库
         existing = await self._mysql.find_one(
             "exam_papers", {"content_hash": content_hash}
         )
@@ -132,12 +133,12 @@ class MySqlImportService:
                 imported=False,
             )
 
-        # 3. LLM 抽取（复用 prompt + llm 服务，不连 HugeGraph/Milvus）
+        # 3. 从 MinIO 读取 markdown 并 LLM 抽取（复用 prompt + llm 服务，不连 HugeGraph/Milvus）
+        markdown = await self._minio.get_object_text(object_key)
         prompt = self._prompt.build_prompt_sync(markdown)
         extracted = await self._llm.extract(prompt)
 
-        # 4. 生成 ID 并写入 exam_papers
-        paper_id = gen_paper_id(object_key)
+        # 4. 写入 exam_papers
         # 注意：LlmExtractResult.ExamPaper 无 exam_type/year 字段（LLM 输出 schema 不含），
         # 对应列可空，置 None 由数据库存 NULL。
         paper_data = {
@@ -204,6 +205,27 @@ class MySqlImportService:
             question_count=questions_written,
             imported=True,
         )
+
+    async def _resolve_content_hash(self, object_key: str) -> str:
+        """返回原始文件字节的 content_hash（用于 paper_id 派生与去重）。
+
+        优先查 construct 侧 ``edu_construct_files.content_hash``（上传时同步算好）；
+        老记录缺值时下载原始文件补算；完全无 construct 记录时回退到路径 md5
+        （保留旧行为，仅日志告警，不阻断）。
+        """
+        file_id = extract_file_id(object_key)
+        if file_id:
+            row = await self._mysql.find_one("edu_construct_files", {"file_id": file_id})
+            if row:
+                content_hash = row.get("content_hash")
+                if content_hash:
+                    return content_hash
+                storage = row.get("file_storage_path")
+                if storage:
+                    raw = await self._minio.get_object_bytes(storage)
+                    return gen_content_hash_bytes(raw)
+        log.warning("无法确定原始文件 content_hash，回退路径派生: %s", object_key)
+        return hashlib.md5(object_key.encode("utf-8")).hexdigest()
 
     async def import_answers(
         self, object_key: str, paper_id: str
@@ -583,16 +605,10 @@ class MySqlImportService:
         truncated = len(md_files) >= _LIST_MD_LIMIT
         if truncated:
             log.warning("桶内 .md 文件数达到列桶上限 %d，可能存在未列出的文件", _LIST_MD_LIMIT)
-        existing_rows = await self._mysql._execute("SELECT id FROM exam_papers")
-        existing_ids = {row["id"] for row in existing_rows}
-
         answer_only = [f.object_key for f in md_files if _is_answer_only(f.object_key)]
-        to_import = [
-            f.object_key for f in md_files
-            if not _is_answer_only(f.object_key)
-            and gen_paper_id(f.object_key) not in existing_ids
-        ]
-        skipped = len(md_files) - len(to_import)
+        # 已入库判定交由 import_paper 内部按 content_hash 去重（命中时零成本返回 imported=False）
+        to_import = [f.object_key for f in md_files if not _is_answer_only(f.object_key)]
+        skipped = len(answer_only)
         if answer_only:
             log.info("跳过纯答案卷 %d 份", len(answer_only))
         job_id = uuid.uuid4().hex
@@ -633,7 +649,7 @@ class MySqlImportService:
                 job["failed"] += 1
                 job["results"].append({
                     "object_key": key,
-                    "paper_id": gen_paper_id(key),
+                    "paper_id": "",  # 导入失败，paper_id 未知
                     "status": "failed",
                     "error": str(exc),
                 })
