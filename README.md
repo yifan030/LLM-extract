@@ -167,7 +167,7 @@ docker compose up -d
 
 ```bash
 # 第 1 步：仅抽取 + 保存产物，不入库
-curl -X POST http://localhost:8080/api/v1/extract \
+curl -X POST http://localhost:8080/api/edu/extract \
   -H 'Content-Type: application/json' \
   -d '{"object_key":"education/uploads/.../模拟卷.md",
        "save_artifacts":true, "import_to_hg":false}'
@@ -193,7 +193,7 @@ cat tmp/extractions/890e5428fd13/intermediate.json \
 **第 2 步：审计通过后导入**
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/extract \
+curl -X POST http://localhost:8080/api/edu/extract \
   -H 'Content-Type: application/json' \
   -d '{"object_key":"education/uploads/.../模拟卷.md",
        "save_artifacts":false, "import_to_hg":true}'
@@ -205,7 +205,7 @@ curl -X POST http://localhost:8080/api/v1/extract \
 
 ```bash
 # 默认行为：save_artifacts=false, import_to_hg=true
-curl -X POST http://localhost:8080/api/v1/extract \
+curl -X POST http://localhost:8080/api/edu/extract \
   -H 'Content-Type: application/json' \
   -d '{"object_key":"education/uploads/.../模拟卷.md"}'
 ```
@@ -229,17 +229,17 @@ python cli.py \
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | `GET` | `/health` | 健康检查 |
-| `POST` | `/api/v1/extract` | 试卷抽取（支持审计/导入模式） |
-| `GET` | `/api/v1/minio/files` | MinIO `.md` 文件列表 |
-| `POST` | `/api/v1/minio/webhook/minio` | MinIO bucket 事件回调 |
-| `GET` | `/api/v1/knowledge` | 四级知识点列表 |
-| `GET` | `/api/v1/knowledge/{kp_id}` | 单个知识点详情 |
-| `GET` | `/api/v1/papers` | 已导入试卷列表 |
-| `GET` | `/api/v1/papers/{paper_id}` | 试卷详情 |
-| `GET` | `/api/v1/papers/{paper_id}/questions` | 试卷题目列表 |
-| `GET` | `/api/v1/questions/{question_id}` | 题目详情 |
-| `POST` | `/api/v1/scoring/parse` | OCR markdown 解析为判分 JSON（不走 LLM） |
-| `POST` | `/api/v1/search/questions` | 试题语义搜索（dense + BM25 混合检索） |
+| `POST` | `/api/edu/extract` | 试卷抽取（支持审计/导入模式） |
+| `GET` | `/api/edu/minio/files` | MinIO `.md` 文件列表 |
+| `POST` | `/api/edu/minio/webhook/minio` | MinIO bucket 事件回调 |
+| `GET` | `/api/edu/knowledge` | 四级知识点列表 |
+| `GET` | `/api/edu/knowledge/{kp_id}` | 单个知识点详情 |
+| `GET` | `/api/edu/papers` | 已导入试卷列表 |
+| `GET` | `/api/edu/papers/{paper_id}` | 试卷详情 |
+| `GET` | `/api/edu/papers/{paper_id}/questions` | 试卷题目列表 |
+| `GET` | `/api/edu/questions/{question_id}` | 题目详情 |
+| `POST` | `/api/edu/scoring/parse` | OCR markdown 解析为判分 JSON（不走 LLM） |
+| `POST` | `/api/edu/search/questions` | 试题语义搜索（dense + BM25 混合检索） |
 
 ### 抽取请求参数
 
@@ -260,7 +260,7 @@ python cli.py \
 ## OCR Markdown 解析（判分）
 
 ```
-POST /api/v1/scoring/parse
+POST /api/edu/scoring/parse
 ```
 
 上传 PDF 试卷文件，调用 OCR 服务解析后返回结构化判分数据。纯规则解析不走 LLM。用于提取学生作答与标准答案，供后续判分流程使用。
@@ -278,12 +278,12 @@ POST /api/v1/scoring/parse
 
 ```bash
 # 答题卡模式
-curl -X POST "http://localhost:8080/api/v1/scoring/parse" \
+curl -X POST "http://localhost:8080/api/edu/scoring/parse" \
   -F "file=@/path/to/answer_sheet.pdf" \
   -F "paper_id=paper_xxx"
 
 # 完整试卷模式
-curl -X POST "http://localhost:8080/api/v1/scoring/parse" \
+curl -X POST "http://localhost:8080/api/edu/scoring/parse" \
   -F "file=@/path/to/exam_paper.pdf"
 ```
 
@@ -348,7 +348,7 @@ curl -X POST "http://localhost:8080/api/v1/scoring/parse" \
 ## 试题语义搜索
 
 ```
-POST /api/v1/search/questions
+POST /api/edu/search/questions
 ```
 
 基于 Milvus 的 Dense + BM25 混合检索，支持按知识点层级过滤。

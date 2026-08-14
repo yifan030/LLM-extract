@@ -138,7 +138,7 @@ def create_app() -> FastAPI:
         response.headers["X-Correlation-Id"] = cid
         return response
 
-    app_.include_router(v1_router, prefix="/api/v1")
+    app_.include_router(v1_router, prefix="/api/edu")
 
     @app_.get("/health")
     async def health():
