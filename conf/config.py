@@ -51,6 +51,8 @@ class Settings(BaseSettings):
 
     # ── MySQL ──
     mysql_url: str = "mysql+aiomysql://root:root@localhost:3306/llm_construct"
+    # MySQL 自动入库（消费 extract:events 事件，默认关闭）
+    mysql_auto_import: bool = False
 
     # ── Embedding ──
     embed_base_url: str = ""

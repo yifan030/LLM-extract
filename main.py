@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from service.api.deps import set_mysql_repo
 from service.api.router import router as v1_router
 from conf.config import Settings
-from core.events import start_consumer
+from core.events import start_consumer, start_mysql_consumer
 from core.exceptions import AppError
 from logs.context import set_correlation_id, get_correlation_id
 from logs.logging import get_logger
@@ -23,16 +23,19 @@ from service.embedding import EmbeddingService
 from service.extraction import ExtractionService
 from service.llm import LlmService
 from service.matcher import MatcherService
+from service.mysql_import import MySqlImportService
 from service.prompt import PromptService
 
 log = get_logger(__name__)
 
 _consumer_task: asyncio.Task | None = None
+_mysql_consumer_task: asyncio.Task | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _consumer_task
+    global _mysql_consumer_task
 
     settings = Settings()
     log.info("应用启动")
@@ -87,6 +90,16 @@ async def lifespan(app: FastAPI):
         )
         log.info("Redis Stream 消费者后台任务已创建")
 
+        # ── MySQL 自动入库消费者（独立 group，需 redis_url + mysql_repo + 开关开启）──
+        if settings.mysql_auto_import and mysql_repo is not None:
+            mysql_import_svc = MySqlImportService(
+                minio_repo, mysql_repo, llm_svc, prompt_svc
+            )
+            _mysql_consumer_task = asyncio.create_task(
+                start_mysql_consumer(settings.redis_url, mysql_import_svc)
+            )
+            log.info("MySQL 自动入库消费者后台任务已创建")
+
     yield
 
     # ── 关闭 ──
@@ -94,6 +107,12 @@ async def lifespan(app: FastAPI):
         _consumer_task.cancel()
         try:
             await _consumer_task
+        except asyncio.CancelledError:
+            pass
+    if _mysql_consumer_task:
+        _mysql_consumer_task.cancel()
+        try:
+            await _mysql_consumer_task
         except asyncio.CancelledError:
             pass
     if milvus_repo is not None:
