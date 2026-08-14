@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """MySQL 异步仓库层 — 连接池、建表、CRUD。"""
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from conf.config import Settings
 from core.exceptions import MySqlError
@@ -22,8 +22,10 @@ _DDL_STATEMENTS = [
         duration_minutes INT,
         exam_type   VARCHAR(20),
         paper_year  INT,
+        content_hash VARCHAR(32) NULL,
         created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
-        updated_at  DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        updated_at  DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_content_hash (content_hash)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
     # 2. questions
@@ -177,11 +179,43 @@ class MySqlRepository:
         self._url = settings.mysql_url
 
     async def init_tables(self) -> None:
-        """幂等建表 — 应用启动时调用，确保 6 张表存在。"""
+        """幂等建表 — 应用启动时调用，确保表存在并补齐迁移列。"""
         async with self._engine.begin() as conn:
             for ddl in _DDL_STATEMENTS:
                 await conn.execute(text(ddl))
+        await self._migrate()
         log.info("MySQL 表结构初始化完成（10 张表）")
+
+    async def _migrate(self) -> None:
+        """幂等补齐存量 exam_papers 的 content_hash 列与唯一索引。
+
+        ``CREATE TABLE IF NOT EXISTS`` 只建新表、不改已有表；MySQL 8.0 的
+        ``ALTER TABLE`` 又不支持 ``IF NOT EXISTS``，故先用 inspector 探测
+        列/索引是否已存在，缺失才执行 ALTER。
+        """
+        async with self._engine.connect() as conn:
+            columns, indexes = await conn.run_sync(self._inspect_exam_papers)
+        if not columns:
+            return  # exam_papers 表尚不存在（DDL 已先建，理论不会走到）
+        async with self._engine.begin() as conn:
+            if "content_hash" not in columns:
+                await conn.execute(text(
+                    "ALTER TABLE exam_papers ADD COLUMN content_hash VARCHAR(32) NULL"
+                ))
+            if "uk_content_hash" not in indexes:
+                await conn.execute(text(
+                    "ALTER TABLE exam_papers ADD UNIQUE KEY uk_content_hash (content_hash)"
+                ))
+
+    @staticmethod
+    def _inspect_exam_papers(sync_conn) -> tuple[set[str], set[str]]:
+        """返回 exam_papers 的列名集合与索引名集合（表不存在时返回空集）。"""
+        inspector = inspect(sync_conn)
+        if "exam_papers" not in inspector.get_table_names():
+            return set(), set()
+        columns = {c["name"] for c in inspector.get_columns("exam_papers")}
+        indexes = {i["name"] for i in inspector.get_indexes("exam_papers")}
+        return columns, indexes
 
     async def close(self) -> None:
         """关闭连接池，应用关闭时调用。"""

@@ -40,6 +40,37 @@ class TestMySqlRepositoryDDL:
         actual = {list(r.values())[0] for r in rows}
         assert expected.issubset(actual)
 
+    async def test_migrate_adds_content_hash_to_existing_table(
+        self, mysql_repo: MySqlRepository
+    ):
+        """幂等迁移：存量 exam_papers（无 content_hash 列/索引）经 init_tables 补齐。"""
+        from sqlalchemy import inspect, text
+
+        async def _snapshot() -> tuple[set[str], set[str]]:
+            async with mysql_repo._engine.connect() as conn:
+                def _collect(sync_conn):
+                    insp = inspect(sync_conn)
+                    return (
+                        {c["name"] for c in insp.get_columns("exam_papers")},
+                        {i["name"] for i in insp.get_indexes("exam_papers")},
+                    )
+                return await conn.run_sync(_collect)
+
+        # 模拟旧表：先移除 content_hash 列与唯一索引
+        async with mysql_repo._engine.begin() as conn:
+            await conn.execute(text("ALTER TABLE exam_papers DROP INDEX uk_content_hash"))
+            await conn.execute(text("ALTER TABLE exam_papers DROP COLUMN content_hash"))
+
+        columns, indexes = await _snapshot()
+        assert "content_hash" not in columns
+        assert "uk_content_hash" not in indexes
+
+        await mysql_repo.init_tables()  # 触发迁移补齐
+
+        columns, indexes = await _snapshot()
+        assert "content_hash" in columns
+        assert "uk_content_hash" in indexes
+
 
 @pytest.mark.asyncio
 class TestMySqlRepositoryCRUD:

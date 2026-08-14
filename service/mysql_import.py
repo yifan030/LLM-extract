@@ -22,7 +22,7 @@ from model.mysql_schemas import (
     RecommendResponse,
     WeakKnowledgePoint,
 )
-from libs.id_gen import gen_paper_id, gen_question_id
+from libs.id_gen import gen_content_hash, gen_paper_id, gen_question_id
 from libs.minio import MinioRepository
 from libs.mysql import MySqlRepository
 from service.llm import LlmService
@@ -106,23 +106,43 @@ class MySqlImportService:
     async def import_paper(self, object_key: str) -> PaperImportResponse:
         """从 MinIO 读取试卷 markdown，LLM 抽取后写入 exam_papers + questions。
 
-        流程：MinIO 取文件 → LLM 抽取 → 写 exam_papers + questions
+        流程：MinIO 取文件 → 内容 hash 查重（命中直接返回已有 paper_id）
+        → LLM 抽取 → 写 exam_papers + questions
         """
         log.info("MySQL 试卷导入开始: object_key=%s", object_key)
 
         # 1. 从 MinIO 读取
         markdown = await self._minio.get_object_text(object_key)
 
-        # 2. LLM 抽取（复用 prompt + llm 服务，不连 HugeGraph/Milvus）
+        # 2. 内容去重：归一化后的内容指纹命中库中已有试卷，直接返回，不再抽取/写库
+        content_hash = gen_content_hash(markdown)
+        existing = await self._mysql.find_one(
+            "exam_papers", {"content_hash": content_hash}
+        )
+        if existing:
+            question_count = await self._count_questions(existing["id"])
+            log.info(
+                "命中内容重复，跳过导入: object_key=%s -> paper_id=%s",
+                object_key, existing["id"],
+            )
+            return PaperImportResponse(
+                paper_id=existing["id"],
+                title=existing.get("title") or "",
+                question_count=question_count,
+                imported=False,
+            )
+
+        # 3. LLM 抽取（复用 prompt + llm 服务，不连 HugeGraph/Milvus）
         prompt = self._prompt.build_prompt_sync(markdown)
         extracted = await self._llm.extract(prompt)
 
-        # 3. 生成 ID 并写入 exam_papers
+        # 4. 生成 ID 并写入 exam_papers
         paper_id = gen_paper_id(object_key)
         # 注意：LlmExtractResult.ExamPaper 无 exam_type/year 字段（LLM 输出 schema 不含），
         # 对应列可空，置 None 由数据库存 NULL。
         paper_data = {
             "id": paper_id,
+            "content_hash": content_hash,
             "title": extracted.exam_paper.title or "",
             "grade": extracted.exam_paper.grade,
             "subject": extracted.exam_paper.subject or "数学",
@@ -134,7 +154,7 @@ class MySqlImportService:
         await self._mysql.upsert("exam_papers", paper_data, ["id"])
         log.info("试卷已写入 MySQL: %s", paper_id)
 
-        # 4. 逐题写入 questions
+        # 5. 逐题写入 questions
         questions_written = 0
         kp_id_map = await self._load_kp_name_map()
         for idx, q in enumerate(extracted.questions):
@@ -485,6 +505,14 @@ class MySqlImportService:
             weak_knowledge_points=weak_kps,
             recommended_questions=all_recommended,
         )
+
+    async def _count_questions(self, paper_id: str) -> int:
+        """统计某试卷的题目数（内容去重命中时用于响应 question_count）。"""
+        rows = await self._mysql._execute(
+            "SELECT COUNT(*) AS c FROM questions WHERE exam_paper_id = :paper_id",
+            {"paper_id": paper_id},
+        )
+        return int(rows[0]["c"]) if rows else 0
 
     async def _load_kp_name_map(self) -> dict[str, int]:
         """加载 knowledge_points 表 name → id 映射（同名多级时优先 level==4）。"""

@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from core.exceptions import AppError, PaperNotFound
-from libs.id_gen import gen_paper_id
+from libs.id_gen import gen_content_hash, gen_paper_id
 from model.mysql_schemas import (
     AnswerImportResponse,
     AnswerSheetImportResponse,
@@ -63,6 +63,7 @@ class TestMySqlImportService:
     async def test_import_paper(self, mock_deps):
         """试卷导入：LLM 抽取 + 写入 exam_papers + questions。"""
         minio_repo, mysql_repo, llm_svc, prompt_svc = mock_deps
+        mysql_repo.find_one.return_value = None  # 无内容重复
         svc = MySqlImportService(minio_repo, mysql_repo, llm_svc, prompt_svc)
 
         result = await svc.import_paper("papers/test.md")
@@ -84,6 +85,13 @@ class TestMySqlImportService:
         assert upsert_tables.count("exam_papers") == 1
         assert upsert_tables.count("questions") == 1
 
+        # 校验写入的试卷数据（含内容指纹 content_hash）
+        p_args = next(
+            c.args[1] for c in mysql_repo.upsert.call_args_list
+            if c.args[0] == "exam_papers"
+        )
+        assert p_args["content_hash"] == gen_content_hash("# 测试试卷\n...")
+
         # 校验写入的题目数据（知识点名称 JSON 序列化进 knowledge_point_ids 列）
         q_args = next(
             c.args[1] for c in mysql_repo.upsert.call_args_list
@@ -95,6 +103,31 @@ class TestMySqlImportService:
         assert json.loads(q_args["knowledge_point_ids"]) == ["交集", "并集"]
         assert q_args["img_url"] is None  # 空列表落库为 NULL
         assert q_args["answer_img"] is None
+
+    async def test_import_paper_dedup_hit_skips(self, mock_deps):
+        """内容重复（不同 object_key）→ 返回库里已有 paper_id，跳过 LLM 与写库。"""
+        minio_repo, mysql_repo, llm_svc, prompt_svc = mock_deps
+        # 库里已有一份相同内容的试卷，但 id 与当前 object_key 派生不同
+        mysql_repo.find_one.return_value = {"id": "paper_old", "title": "旧试卷"}
+        mysql_repo._execute.return_value = [{"c": 3}]
+        svc = MySqlImportService(minio_repo, mysql_repo, llm_svc, prompt_svc)
+
+        result = await svc.import_paper("papers/new_key.md")
+
+        # 返回库里已有的 paper_id，而非 md5(new_key) 派生的新 id
+        assert result.paper_id == "paper_old"
+        assert result.imported is False
+        assert result.title == "旧试卷"
+        assert result.question_count == 3
+
+        # 未再跑 LLM、未写库
+        llm_svc.extract.assert_not_called()
+        mysql_repo.upsert.assert_not_called()
+        # 命中判定按内容 hash 查库（而非按 object_key）
+        mysql_repo.find_one.assert_called_once_with(
+            "exam_papers",
+            {"content_hash": gen_content_hash("# 测试试卷\n...")},
+        )
 
     async def test_import_answers_paper_not_found(self, mock_deps):
         """答案导入：试卷不存在时抛 PaperNotFound。"""
