@@ -447,3 +447,11 @@ async def test_handle_event_answer(mock_deps):
         out = await svc.handle_event("education/uploads/answer/p1/f2/foo_parsed/foo.md")
     assert out == {"category": "answer", "updated": 3}
     m.assert_awaited_once_with("education/uploads/answer/p1/f2/foo_parsed/foo.md", "paper_x")
+
+
+@pytest.mark.asyncio
+async def test_handle_event_unknown_category(mock_deps):
+    minio_repo, mysql_repo, llm_svc, prompt_svc = mock_deps
+    svc = MySqlImportService(minio_repo, mysql_repo, llm_svc, prompt_svc)
+    with pytest.raises(ValueError):
+        await svc.handle_event("education/uploads/video/f1/x.md")

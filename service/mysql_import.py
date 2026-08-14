@@ -87,6 +87,9 @@ class MySqlImportService:
             result = await self.import_paper(object_key)
             return {"category": "paper", "paper_id": result.paper_id}
 
+        if category not in ("answer", "answer_sheet"):
+            raise ValueError(f"未知 category: {category}")
+
         paper_id = await resolve_paper_id(self._minio, paper_file_id)
 
         if category == "answer":
