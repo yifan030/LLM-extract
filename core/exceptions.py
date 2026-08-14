@@ -99,3 +99,10 @@ class MySqlError(AppError):
     """MySQL 操作失败（连接超时 / 查询错误 / 约束冲突）。"""
     def __init__(self, message: str, detail: dict | None = None):
         super().__init__(message, status_code=502, detail=detail)
+
+
+class PaperNotReady(Exception):
+    """试卷 MD 尚未解析完成（用于消费者重试，不 ack）。"""
+    def __init__(self, paper_file_id: str):
+        self.paper_file_id = paper_file_id
+        super().__init__(f"试卷尚未解析完成: {paper_file_id}")
