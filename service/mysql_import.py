@@ -27,6 +27,7 @@ from libs.minio import MinioRepository
 from libs.mysql import MySqlRepository
 from service.llm import LlmService
 from service.prompt import PromptService
+from service.mysql_events import parse_event_key, resolve_paper_id
 from logs.decorators import log_step
 from logs.logging import get_logger
 
@@ -74,6 +75,30 @@ class MySqlImportService:
         self._mysql = mysql_repo
         self._llm = llm_svc
         self._prompt = prompt_svc
+
+    async def handle_event(self, object_key: str) -> dict:
+        """消费 extract:events 事件，按 category 路由到对应导入方法。
+
+        answer/answer_sheet 依赖 paper_id，由 paper_file_id 反解；失败抛异常不 ack（交 Redis 重试）。
+        """
+        category, paper_file_id = parse_event_key(object_key)
+
+        if category == "paper":
+            result = await self.import_paper(object_key)
+            return {"category": "paper", "paper_id": result.paper_id}
+
+        paper_id = await resolve_paper_id(self._minio, paper_file_id)
+
+        if category == "answer":
+            result = await self.import_answers(object_key, paper_id)
+            return {"category": "answer", "updated": result.updated_count}
+
+        if category == "answer_sheet":
+            ocr_text = await self._minio.get_object_text(object_key)
+            result = await self.import_answer_sheet_from_text(ocr_text, paper_id)
+            return {"category": "answer_sheet", "student_id": result.student_id}
+
+        raise ValueError(f"未知 category: {category}")
 
     async def import_paper(self, object_key: str) -> PaperImportResponse:
         """从 MinIO 读取试卷 markdown，LLM 抽取后写入 exam_papers + questions。

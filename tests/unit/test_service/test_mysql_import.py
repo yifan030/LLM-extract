@@ -422,3 +422,28 @@ class TestMySqlImportService:
 
         assert resp.truncated is True
         assert any("达到列桶上限" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_handle_event_paper(mock_deps):
+    minio_repo, mysql_repo, llm_svc, prompt_svc = mock_deps
+    svc = MySqlImportService(minio_repo, mysql_repo, llm_svc, prompt_svc)
+    with patch.object(svc, "import_paper", new=AsyncMock(return_value=PaperImportResponse(
+        paper_id="paper_x", title="t", question_count=1, imported=True
+    ))) as m:
+        out = await svc.handle_event("education/uploads/paper/f1/foo_parsed/foo.md")
+    assert out == {"category": "paper", "paper_id": "paper_x"}
+    m.assert_awaited_once_with("education/uploads/paper/f1/foo_parsed/foo.md")
+
+
+@pytest.mark.asyncio
+async def test_handle_event_answer(mock_deps):
+    minio_repo, mysql_repo, llm_svc, prompt_svc = mock_deps
+    svc = MySqlImportService(minio_repo, mysql_repo, llm_svc, prompt_svc)
+    with patch("service.mysql_import.resolve_paper_id", new=AsyncMock(return_value="paper_x")), \
+         patch.object(svc, "import_answers", new=AsyncMock(return_value=AnswerImportResponse(
+             paper_id="paper_x", updated_count=3
+         ))) as m:
+        out = await svc.handle_event("education/uploads/answer/p1/f2/foo_parsed/foo.md")
+    assert out == {"category": "answer", "updated": 3}
+    m.assert_awaited_once_with("education/uploads/answer/p1/f2/foo_parsed/foo.md", "paper_x")
