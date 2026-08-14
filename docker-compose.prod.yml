@@ -63,6 +63,7 @@ services:
 
       # ── MySQL (服务器已运行，宿主机 127.0.0.1:8306) ──
       - MYSQL_URL=${MYSQL_URL}
+      - MYSQL_AUTO_IMPORT=${MYSQL_AUTO_IMPORT:-false}
 
       # ── Embedding ──
       - EMBED_BASE_URL=${EMBED_BASE_URL:-}
