@@ -98,7 +98,7 @@ class MySqlImportService:
 
         if category == "answer_sheet":
             ocr_text = await self._minio.get_object_text(object_key)
-            result = await self.import_answer_sheet_from_text(ocr_text, paper_id)
+            result = await self.import_answer_sheet_from_text(ocr_text, paper_id, source_key=object_key)
             return {"category": "answer_sheet", "student_id": result.student_id}
 
         raise ValueError(f"未知 category: {category}")

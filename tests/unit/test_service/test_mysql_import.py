@@ -450,6 +450,26 @@ async def test_handle_event_answer(mock_deps):
 
 
 @pytest.mark.asyncio
+async def test_handle_event_answer_sheet(mock_deps):
+    minio_repo, mysql_repo, llm_svc, prompt_svc = mock_deps
+    svc = MySqlImportService(minio_repo, mysql_repo, llm_svc, prompt_svc)
+    with patch("service.mysql_import.resolve_paper_id", new=AsyncMock(return_value="paper_x")), \
+         patch.object(svc._minio, "get_object_text", new=AsyncMock(return_value="ocr text")), \
+         patch.object(svc, "import_answer_sheet_from_text", new=AsyncMock(
+             return_value=AnswerSheetImportResponse(
+                 student_id=5, student_name="张三", paper_id="paper_x",
+                 scored_count=1, total_obtained=5.0,
+             )
+         )) as m:
+        out = await svc.handle_event("education/uploads/answer_sheet/p1/f2/foo_parsed/foo.md")
+    assert out == {"category": "answer_sheet", "student_id": 5}
+    m.assert_awaited_once_with(
+        "ocr text", "paper_x",
+        source_key="education/uploads/answer_sheet/p1/f2/foo_parsed/foo.md",
+    )
+
+
+@pytest.mark.asyncio
 async def test_handle_event_unknown_category(mock_deps):
     minio_repo, mysql_repo, llm_svc, prompt_svc = mock_deps
     svc = MySqlImportService(minio_repo, mysql_repo, llm_svc, prompt_svc)
