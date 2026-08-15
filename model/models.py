@@ -43,8 +43,8 @@ class Vertex(BaseModel):
 
 class Edge(BaseModel):
     label: str
-    outV: str
-    inV: str
+    outV: str | int
+    inV: str | int
     properties: dict[str, Any]
 
 

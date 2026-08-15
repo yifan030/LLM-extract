@@ -51,12 +51,15 @@ _DDL_STATEMENTS = [
     # 3. knowledge_points
     """
     CREATE TABLE IF NOT EXISTS knowledge_points (
-        id        INT          AUTO_INCREMENT PRIMARY KEY,
-        name      VARCHAR(100) NOT NULL,
-        level     TINYINT      NOT NULL,
-        parent_id INT          NULL,
-        sort_order INT         DEFAULT 0,
-        FOREIGN KEY (parent_id) REFERENCES knowledge_points(id)
+        id          INT          AUTO_INCREMENT PRIMARY KEY,
+        name        VARCHAR(100) NOT NULL,
+        level       TINYINT      NOT NULL,
+        parent_id   INT          NULL,
+        subject     VARCHAR(20)  NULL,
+        description VARCHAR(1024) NULL,
+        sort_order  INT          DEFAULT 0,
+        FOREIGN KEY (parent_id) REFERENCES knowledge_points(id),
+        UNIQUE KEY uk_name_level (name, level)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
     # 4. formulas_theorems
@@ -187,34 +190,57 @@ class MySqlRepository:
         log.info("MySQL 表结构初始化完成（10 张表）")
 
     async def _migrate(self) -> None:
-        """幂等补齐存量 exam_papers 的 content_hash 列与唯一索引。
+        """幂等补齐存量表的列与唯一索引。
 
         ``CREATE TABLE IF NOT EXISTS`` 只建新表、不改已有表；MySQL 8.0 的
         ``ALTER TABLE`` 又不支持 ``IF NOT EXISTS``，故先用 inspector 探测
         列/索引是否已存在，缺失才执行 ALTER。
         """
         async with self._engine.connect() as conn:
-            columns, indexes = await conn.run_sync(self._inspect_exam_papers)
-        if not columns:
-            return  # exam_papers 表尚不存在（DDL 已先建，理论不会走到）
+            exam_columns, exam_indexes = await conn.run_sync(self._inspect_exam_papers)
+            kp_columns, kp_indexes = await conn.run_sync(self._inspect_knowledge_points)
         async with self._engine.begin() as conn:
-            if "content_hash" not in columns:
-                await conn.execute(text(
-                    "ALTER TABLE exam_papers ADD COLUMN content_hash VARCHAR(32) NULL"
-                ))
-            if "uk_content_hash" not in indexes:
-                await conn.execute(text(
-                    "ALTER TABLE exam_papers ADD UNIQUE KEY uk_content_hash (content_hash)"
-                ))
+            if exam_columns:
+                if "content_hash" not in exam_columns:
+                    await conn.execute(text(
+                        "ALTER TABLE exam_papers ADD COLUMN content_hash VARCHAR(32) NULL"
+                    ))
+                if "uk_content_hash" not in exam_indexes:
+                    await conn.execute(text(
+                        "ALTER TABLE exam_papers ADD UNIQUE KEY uk_content_hash (content_hash)"
+                    ))
+            if kp_columns:
+                if "subject" not in kp_columns:
+                    await conn.execute(text(
+                        "ALTER TABLE knowledge_points ADD COLUMN subject VARCHAR(20) NULL"
+                    ))
+                if "description" not in kp_columns:
+                    await conn.execute(text(
+                        "ALTER TABLE knowledge_points ADD COLUMN description VARCHAR(1024) NULL"
+                    ))
+                if "uk_name_level" not in kp_indexes:
+                    await conn.execute(text(
+                        "ALTER TABLE knowledge_points ADD UNIQUE KEY uk_name_level (name, level)"
+                    ))
 
     @staticmethod
     def _inspect_exam_papers(sync_conn) -> tuple[set[str], set[str]]:
         """返回 exam_papers 的列名集合与索引名集合（表不存在时返回空集）。"""
+        return MySqlRepository._inspect_table(sync_conn, "exam_papers")
+
+    @staticmethod
+    def _inspect_knowledge_points(sync_conn) -> tuple[set[str], set[str]]:
+        """返回 knowledge_points 的列名集合与索引名集合（表不存在时返回空集）。"""
+        return MySqlRepository._inspect_table(sync_conn, "knowledge_points")
+
+    @staticmethod
+    def _inspect_table(sync_conn, table: str) -> tuple[set[str], set[str]]:
+        """返回指定表的列名集合与索引名集合（表不存在时返回空集）。"""
         inspector = inspect(sync_conn)
-        if "exam_papers" not in inspector.get_table_names():
+        if table not in inspector.get_table_names():
             return set(), set()
-        columns = {c["name"] for c in inspector.get_columns("exam_papers")}
-        indexes = {i["name"] for i in inspector.get_indexes("exam_papers")}
+        columns = {c["name"] for c in inspector.get_columns(table)}
+        indexes = {i["name"] for i in inspector.get_indexes(table)}
         return columns, indexes
 
     async def close(self) -> None:

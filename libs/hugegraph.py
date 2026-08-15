@@ -147,6 +147,81 @@ class HugeGraphRepository:
         log.error("边创建失败: %s -[%s]-> %s: %s", edge.outV, edge.label, edge.inV, resp.text)
         return False, False
 
+    async def delete_vertex(self, vertex_id: str) -> bool:
+        """删除指定 id 的顶点，返回是否删除成功（404 视为不存在）。
+
+        HugeGraph 删除顶点会级联删除其关联边。
+        """
+        url = f'{self.base_url}/graph/vertices/"{vertex_id}"'
+        try:
+            async with await self._client() as client:
+                resp = await client.delete(url)
+        except httpx.TimeoutException as exc:
+            raise HugeGraphTimeout(
+                f"HugeGraph DELETE 顶点 超时: {url}",
+                detail={"url": url, "vertex_id": vertex_id},
+            ) from exc
+        if resp.status_code in (200, 204):
+            log.info("顶点删除成功: %s", vertex_id)
+            return True
+        if resp.status_code == 404:
+            log.debug("顶点不存在，跳过删除: %s", vertex_id)
+            return False
+        log.error("顶点删除失败: %s status=%d reason=%s", vertex_id, resp.status_code, resp.text)
+        return False
+
+    async def ensure_vertex_property(
+        self, label: str, prop: str, data_type: str
+    ) -> None:
+        """幂等确保某顶点标签拥有某属性。
+
+        属性键不存在则先创建，再以 ``?action=append`` 挂到顶点标签（同时加入
+        nullable_keys，使缺省值为 null）。
+        """
+        async with await self._client() as client:
+            # 1. 属性键不存在则创建
+            resp = await client.get(f"{self.base_url}/schema/propertykeys/{prop}")
+            if resp.status_code == 404:
+                body = {
+                    "name": prop,
+                    "data_type": data_type,
+                    "cardinality": "SINGLE",
+                    "aggregate_type": "NONE",
+                    "properties": [],
+                }
+                created = await client.post(
+                    f"{self.base_url}/schema/propertykeys", json=body
+                )
+                if created.status_code not in (200, 201, 202):
+                    log.error(
+                        "创建属性键失败: %s status=%d %s",
+                        prop, created.status_code, created.text,
+                    )
+                    return
+                log.info("属性键创建成功: %s (%s)", prop, data_type)
+
+            # 2. 已挂在标签上则跳过
+            resp = await client.get(f"{self.base_url}/schema/vertexlabels/{label}")
+            resp.raise_for_status()
+            props = resp.json().get("properties", [])
+            if prop in props:
+                log.debug("属性已在顶点标签上，跳过 append: %s.%s", label, prop)
+                return
+
+            # 3. append 到标签
+            body = {"name": label, "properties": [prop], "nullable_keys": [prop]}
+            appended = await client.put(
+                f"{self.base_url}/schema/vertexlabels/{label}?action=append",
+                json=body,
+            )
+            if appended.status_code not in (200, 201, 202):
+                log.error(
+                    "顶点标签 append 属性失败: %s.%s status=%d %s",
+                    label, prop, appended.status_code, appended.text,
+                )
+                return
+            log.info("顶点标签 append 属性成功: %s.%s", label, prop)
+
     async def list_vertices(
         self, label: str, limit: int = 100, offset: int = 0
     ) -> list[dict]:
@@ -162,6 +237,24 @@ class HugeGraphRepository:
         except httpx.TimeoutException as exc:
             raise HugeGraphTimeout(
                 f"HugeGraph GET 顶点列表 超时: {url}",
+                detail={"url": url, "label": label},
+            ) from exc
+
+    async def list_edges(
+        self, label: str, limit: int = 1000, offset: int = 0
+    ) -> list[dict]:
+        """分页列出指定 label 的全部边。"""
+        url = f"{self.base_url}/graph/edges?label={label}&limit={limit}"
+        if offset:
+            url += f"&offset={offset}"
+        try:
+            async with await self._client() as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                return resp.json().get("edges", [])
+        except httpx.TimeoutException as exc:
+            raise HugeGraphTimeout(
+                f"HugeGraph GET 边列表 超时: {url}",
                 detail={"url": url, "label": label},
             ) from exc
 
